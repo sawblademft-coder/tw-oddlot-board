@@ -229,7 +229,7 @@ function runDailyAfterHoursScan() {
   const histByCode = {};
   const existingDateKeys = new Set();
   histRows.forEach(r => {
-    const c = String(r[1]).trim();
+    const c = normCode(r[1]);
     const dStr = formatDateVal(r[0]);
     if (!c || !dStr) return;
     existingDateKeys.add(c + '_' + dStr);
@@ -248,9 +248,10 @@ function runDailyAfterHoursScan() {
   const dailyLogRows = [];
   const buyCandidates = [];
   const antiAlerts = [];
+  let skippedShortHistory = 0;
 
   wlRows.forEach(w => {
-    const code = String(w[0]).trim();
+    const code = normCode(w[0]);
     const name = String(w[1]).trim();
     const category = String(w[2]).trim();
     const market = String(w[3]).trim();
@@ -273,7 +274,10 @@ function runDailyAfterHoursScan() {
 
     const series = Object.values(histByCode[code]).sort((a, b) => a.date.localeCompare(b.date));
     histByCode[code] = series;
-    if (series.length < 62) return;
+    if (series.length < 62) {
+      skippedShortHistory++;
+      return;
+    }
 
     const latestBar = series[series.length - 1];
     const quote = latestBar;
@@ -339,7 +343,7 @@ function runDailyAfterHoursScan() {
   // 8. 預約明日 13:38 精準觸發（週一到週五）
   scheduleNextDailyTrigger();
 
-  return { date: todayStr, count: dailyLogRows.length, appendedHistory: appendHistRows.length };
+  return { date: todayStr, count: dailyLogRows.length, skippedShortHistory, appendedHistory: appendHistRows.length };
 }
 
 // ==================== 5. 技術指標與手冊規則引擎 ====================
@@ -904,7 +908,7 @@ function fetchYahooLatestQuotesBatch(wlRows) {
   const resultMap = {};
   const targets = [];
   wlRows.forEach(w => {
-    const code = String(w[0]).trim();
+    const code = normCode(w[0]);
     const market = String(w[3]).trim();
     const active = w[6] !== false && String(w[6]).toUpperCase() !== 'FALSE';
     if (code && active) {
@@ -1107,7 +1111,7 @@ function updateStatsSummary(ss, wlRows, histByCode) {
 
   const out = [];
   wlRows.forEach(w => {
-    const code = String(w[0]).trim();
+    const code = normCode(w[0]);
     const name = String(w[1]).trim();
     const cat = String(w[2]).trim();
     const s = statMap[code] || { total: 0, base: 0, buy: 0, alert: 0, lastClose: 0, lastAction: '尚無紀錄' };
@@ -1204,6 +1208,11 @@ function getInstitutionalMap(ss) {
   rows.forEach(r => { map[String(r[0]).trim()] = { consecutiveDays: Number(r[3]) || 0 }; });
   return map;
 }
+function normCode(val) {
+  const s = String(val || '').trim();
+  if (/^\d{1,3}$/.test(s)) return s.padStart(4, '0');
+  return s;
+}
 function formatDateVal(val) {
   if (val instanceof Date) return Utilities.formatDate(val, 'Asia/Taipei', 'yyyy-MM-dd');
   return String(val || '').slice(0, 10);
@@ -1212,7 +1221,7 @@ function getStockChartBars(ss, code, limit) {
   const rows = ss.getSheetByName(SHEET_NAMES.HISTORY).getDataRange().getValues().slice(1);
   const byTime = {};
   rows.forEach(r => {
-    if (String(r[1]).trim() === code) {
+    if (normCode(r[1]) === normCode(code)) {
       const t = formatDateVal(r[0]);
       if (!t || isNaN(Number(r[5]))) return;
       byTime[t] = {

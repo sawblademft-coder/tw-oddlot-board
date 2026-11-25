@@ -654,7 +654,7 @@
         }
         await fetchDashboardData();
         const s = resData.summary || {};
-        alert(`盤後掃描完成！日期：${s.date || '-'}，更新 ${s.count || 0} 檔標的。`);
+        alert(`盤後掃描完成！日期：${s.date || '-'}，更新 ${s.count || 0} 檔標的` + (s.skippedShortHistory ? `（跳過 ${s.skippedShortHistory} 檔歷史不足62天）` : '。'));
       } catch (e) {
         alert('掃描失敗：' + e.message);
       } finally {
