@@ -212,7 +212,7 @@
       position: fixed; bottom: 0; left: 0; right: 0; z-index: 45;
       background: rgba(255, 255, 255, 0.9); backdrop-filter: blur(18px);
       border-top: 1px solid rgba(203, 213, 225, 0.7);
-      display: grid; grid-template-columns: repeat(4, 1fr); padding: 6px 4px 10px;
+      display: grid; grid-template-columns: repeat(5, 1fr); padding: 6px 2px 10px;
     }
     .bottom-nav button {
       border: none; background: transparent; padding: 5px 2px;
@@ -247,6 +247,7 @@
       <button onclick="switchTab('tab-check')">15分鐘檢核＆試算</button>
       <button onclick="switchTab('tab-journal')">持股與日誌</button>
       <button onclick="switchTab('tab-stats')">100檔滾動統計</button>
+      <button onclick="switchTab('tab-sop')">操作流程SOP</button>
     </nav>
 
     <div class="top-actions">
@@ -417,13 +418,120 @@
         </div>
       </div>
     </section>
+    <!-- ==================== 分頁 5：操作規律與實戰 SOP 流程 ==================== -->
+    <section id="tab-sop" class="tab-pane">
+      <div class="card-dark" style="margin-bottom:14px;">
+        <div class="card-title-row">
+          <div class="card-title">⏱️ 每日盤後零股自動化時間軸（13:30 ～ 15:30）</div>
+          <span class="badge badge-watch">免看盤標準節奏</span>
+        </div>
+        <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(190px, 1fr)); gap:10px;">
+          <div class="sub-box">
+            <div class="sub-box-title">13:30 台股收盤</div>
+            <div class="sub-box-main">隔絕盤中情緒</div>
+            <div class="sub-box-desc">不看盤中跳動，靜待收盤價格與量能定案。</div>
+          </div>
+          <div class="sub-box">
+            <div class="sub-box-title">13:38 系統自動掃描</div>
+            <div class="sub-box-main" style="color:#60a5fa;">LINE 推播行動建議</div>
+            <div class="sub-box-desc">GAS 抓取 100 檔價量、計算 C01–C09 與持股保姆提醒，整合發送 1 則 LINE。</div>
+          </div>
+          <div class="sub-box">
+            <div class="sub-box-title">13:40 – 14:25 檢核掛單</div>
+            <div class="sub-box-main" style="color:#f87171;">一律掛「限價單」</div>
+            <div class="sub-box-desc">完成「15分鐘檢核表」後至券商 App 下單。買進掛收盤或高 1–2 跳動點。</div>
+          </div>
+          <div class="sub-box">
+            <div class="sub-box-title">14:30 集合競價撮合</div>
+            <div class="sub-box-main">成交後登錄日誌</div>
+            <div class="sub-box-desc">盤後零股僅撮合一次，未成交切忌追價；成交後至「持股與日誌」記帳。</div>
+          </div>
+          <div class="sub-box">
+            <div class="sub-box-title">15:30 靜默補齊籌碼</div>
+            <div class="sub-box-main">法人統計與週五週報</div>
+            <div class="sub-box-desc">補抓當日三大法人連買天數更新滾動統計；每週五寄送 1 分鐘覆盤週報。</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel-grid two-col" style="margin-bottom:14px;">
+        <!-- 選股與分批進場流程 -->
+        <div class="card-light">
+          <div class="card-title-row">
+            <div class="card-title">🧭 五步選股與進場決策流程</div>
+            <span class="badge badge-light-buy">先算虧損・再算股數</span>
+          </div>
+          <div style="display:flex; flex-direction:column; gap:10px; font-size:13px; line-height:1.6;">
+            <div style="background:#f8fafc; padding:10px 12px; border-radius:12px; border-left:4px solid #1d4ed8;">
+              <strong>Step 1｜大盤與波動定調：</strong>檢查加權指數與 5/20/60 日線。偏多保留 30% 以上現金；劇烈震盪或空頭警戒時提高現金至 50% 以上，不逆勢搶反彈。
+            </div>
+            <div style="background:#f8fafc; padding:10px 12px; border-radius:12px; border-left:4px solid #0284c7;">
+              <strong>Step 2｜必備底線濾網（C08 + C09 + C01）：</strong>日成交量 &gt; 1,000 張（C08）＋ 收盤站上 20/60 日線且兩線上彎（C09）＋ 強於大盤（C01）。優先挑具 C02 法人連買與體質穩健者。
+            </div>
+            <div style="background:#f8fafc; padding:10px 12px; border-radius:12px; border-left:4px solid #dc2626;">
+              <strong>Step 3｜買點共振與警訊排除：</strong>鎖定「均線糾結發散（C04）」或「鳥嘴回測 20 日線 ＋ 下半身／吞噬／晨星」；<strong>排除連漲近 9 根（九日法則）與爆量長上影線</strong>。
+            </div>
+            <div style="background:#f8fafc; padding:10px 12px; border-radius:12px; border-left:4px solid #eab308;">
+              <strong>Step 4｜風控反推零股股數：</strong>先於前低或 20 日線下方設 6%～8% 停損線，套用公式：<code>可買股數 = 單筆最大虧損(1%~1.5%) ÷ (限價 − 停損價)</code>，單檔滿倉上限 24%、同時最多 4 檔。
+            </div>
+            <div style="background:#f8fafc; padding:10px 12px; border-radius:12px; border-left:4px solid #16a34a;">
+              <strong>Step 5｜三段式散彈槍（1-1-1 分批進場）：</strong><br>
+              • <strong>第 1 批試單 (1/3倉)：</strong>訊號初現進場，設好硬停損。<br>
+              • <strong>第 2 批加碼 (1/3倉)：</strong>脫離成本突破前高、5/20MA 上彎時加碼，同步上移停損鎖住整體風險。<br>
+              • <strong>第 3 批順勢 (1/3倉)：</strong>回測 5 日線不破收紅轉強時加碼，將停損上移至總成本「零風險保本線」。
+            </div>
+          </div>
+        </div>
+
+        <!-- 出場防守與八條鐵律 -->
+        <div style="display:flex; flex-direction:column; gap:14px;">
+          <div class="card-light">
+            <div class="card-title-row">
+              <div class="card-title">🛡️ 三道出場防守機制（保姆規則）</div>
+              <span class="badge badge-light-anti">紀律執行</span>
+            </div>
+            <div style="display:flex; flex-direction:column; gap:9px; font-size:13px; line-height:1.55;">
+              <div style="background:#fef2f2; padding:10px 12px; border-radius:12px;">
+                <strong style="color:#b91c1c;">1. 硬停損（價格觸發）：</strong>收盤跌破預設停損價（或跌破 20 日線無法站回），隔日盤後（13:40–14:30）無條件限價全數出清，<strong>絕不向下攤平</strong>。
+              </div>
+              <div style="background:#fffbeb; padding:10px 12px; border-radius:12px;">
+                <strong style="color:#92400e;">2. 時間停損（動能衰竭）：</strong>買進後連續 <strong>5～7 個交易日</strong>橫盤不動、5 日線走平且 MACD 紅柱縮短，主動減碼一半或換股。
+              </div>
+              <div style="background:#f0fdf4; padding:10px 12px; border-radius:12px;">
+                <strong style="color:#15803d;">3. 三段式移動停利：</strong><br>
+                ① 獲利達 <strong>15%～20%</strong> 或連漲近第 9 根／高檔夜星長上影 → 先賣 <strong>1/3</strong> 落袋；<br>
+                ② 出現「反下半身（黑K一半跌破 5 日線且 5 日線下彎）」→ 再賣 <strong>1/3</strong>；<br>
+                ③ 跌破 <strong>20 日線</strong> 或波段最高獲利回吐 <strong>30%</strong> → 最後 1/3 全數清倉。
+              </div>
+            </div>
+          </div>
+
+          <div class="card-dark">
+            <div class="card-title-row">
+              <div class="card-title">📜 高波動環境八條操作鐵律</div>
+            </div>
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; font-size:12px; line-height:1.5;">
+              <div class="sub-box"><strong>1. 先算虧損、再算股數</strong><br><span style="color:#94a3b8;">先決定錯了賠多少，絕不憑感覺買。</span></div>
+              <div class="sub-box"><strong>2. 只做看得懂的結構</strong><br><span style="color:#94a3b8;">均線糾結不明時，寧可空手觀察。</span></div>
+              <div class="sub-box"><strong>3. 不攤平虧損單</strong><br><span style="color:#94a3b8;">觸及停損立即執行，不賭反彈。</span></div>
+              <div class="sub-box"><strong>4. 加碼必上移防守</strong><br><span style="color:#94a3b8;">先保本、再鎖利，讓風險歸零。</span></div>
+              <div class="sub-box"><strong>5. 高波動不用市價單</strong><br><span style="color:#94a3b8;">盤後一律用限價單，杜絕滑價。</span></div>
+              <div class="sub-box"><strong>6. 急漲不追、急跌不盲殺</strong><br><span style="color:#94a3b8;">警戒動能耗盡，等止跌確認再出手。</span></div>
+              <div class="sub-box"><strong>7. 獲利分批收回</strong><br><span style="color:#94a3b8;">先落袋部分資金，波段才抱得穩。</span></div>
+              <div class="sub-box"><strong>8. 紀律大於預測</strong><br><span style="color:#94a3b8;">訊號到了照規矩做，不猜明日漲跌。</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
   </main>
 
   <nav class="bottom-nav" id="mobileNav">
-    <button class="active" onclick="switchTab('tab-today')"><span>📊</span><span>今日戰情</span></button>
+    <button class="active" onclick="switchTab('tab-today')"><span>📊</span><span>戰情室</span></button>
     <button onclick="switchTab('tab-check')"><span>✅</span><span>檢核試算</span></button>
     <button onclick="switchTab('tab-journal')"><span>📒</span><span>持股日誌</span></button>
     <button onclick="switchTab('tab-stats')"><span>📈</span><span>滾動統計</span></button>
+    <button onclick="switchTab('tab-sop')"><span>🧭</span><span>操作SOP</span></button>
   </nav>
 
   <div id="setupModal" class="modal-backdrop hidden">
@@ -533,7 +641,7 @@
       document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
       document.getElementById(tabId).classList.add('active');
       document.querySelectorAll('#desktopNav button, #mobileNav button').forEach(b => b.classList.remove('active'));
-      const idx = ['tab-today', 'tab-check', 'tab-journal', 'tab-stats'].indexOf(tabId);
+      const idx = ['tab-today', 'tab-check', 'tab-journal', 'tab-stats', 'tab-sop'].indexOf(tabId);
       const dBtns = document.querySelectorAll('#desktopNav button');
       const mBtns = document.querySelectorAll('#mobileNav button');
       if (dBtns[idx]) dBtns[idx].classList.add('active');
