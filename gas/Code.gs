@@ -87,7 +87,7 @@ function initSystem() {
   getOrCreateSheet(ss, SHEET_NAMES.HISTORY, ['Date', 'Code', 'Open', 'High', 'Low', 'Close', 'Volume', 'PE', 'Yield', 'PB']);
   getOrCreateSheet(ss, SHEET_NAMES.MARKET_INDEX, ['Date', 'Close', 'ChangePct', 'SMA5', 'SMA20', 'SMA60', 'Tone']);
   getOrCreateSheet(ss, SHEET_NAMES.INSTITUTIONAL, ['Code', 'Date', 'NetBuyShares', 'ConsecutiveDays', 'Top100Vol']);
-  getOrCreateSheet(ss, SHEET_NAMES.DAILY_LOG, ['Date', 'Code', 'Name', 'Close', 'ChangePct', 'VolumeLots', 'Hits', 'Action', 'Reason', 'RecShares', 'LimitPrice', 'StopLoss', 'PE', 'Yield', 'InstDays', 'C02Status']);
+  getOrCreateSheet(ss, SHEET_NAMES.DAILY_LOG, ['Date', 'Code', 'Name', 'Close', 'ChangePct', 'VolumeLots', 'Hits', 'Action', 'Reason', 'RecShares', 'LimitPrice', 'StopLoss', 'PE', 'Yield', 'InstDays', 'C02Status', 'TechJson']);
   getOrCreateSheet(ss, SHEET_NAMES.STATS, ['Code', 'Name', 'Category', 'TotalDays', 'BasePassDays', 'BuySignalDays', 'AlertDays', 'AvgVol20Lots', 'LastClose', 'LastAction', 'MonthlyReview']);
   getOrCreateSheet(ss, SHEET_NAMES.HOLDINGS, ['Id', 'Mode', 'Code', 'Name', 'Stage', 'Shares', 'AvgCost', 'StopLoss', 'HighestPrice', 'EntryDate', 'DaysHeld', 'Status']);
   getOrCreateSheet(ss, SHEET_NAMES.JOURNAL, ['Id', 'Date', 'Mode', 'Code', 'Name', 'Side', 'Stage', 'Shares', 'Price', 'Amount', 'PnL', 'Reason', 'DisciplineNote']);
@@ -141,7 +141,7 @@ function fetchHistoricalBatch(startIdx, endIdx) {
     const market = String(row[3]).trim();
     if (!code) return;
     const suffix = market === 'TPEX' ? '.TWO' : '.TW';
-    const bars = fetchYahooHistory(code + suffix, '4mo');
+    const bars = fetchYahooHistory(code + suffix, '2y');
     bars.forEach(b => {
       newRows.push([b.date, code, b.open, b.high, b.low, b.close, b.volume, '', '', '']);
     });
@@ -291,7 +291,8 @@ function runDailyAfterHoursScan() {
       val.pe,
       val.yield,
       instInfo.consecutiveDays,
-      c02Status
+      c02Status,
+      analysis.techJson
     ]);
 
     if (analysis.action === '試單買進') {
@@ -309,7 +310,7 @@ function runDailyAfterHoursScan() {
     const logSheet = ss.getSheetByName(SHEET_NAMES.DAILY_LOG);
     // 清除同一天舊的掃描紀錄（若有手動重跑）
     removeRowsByDate(logSheet, todayStr);
-    logSheet.getRange(logSheet.getLastRow() + 1, 1, dailyLogRows.length, 16).setValues(dailyLogRows);
+    logSheet.getRange(logSheet.getLastRow() + 1, 1, dailyLogRows.length, 17).setValues(dailyLogRows);
   }
 
   // 4. 更新 Stats_Summary 累積統計
@@ -342,6 +343,11 @@ function analyzeStockRules(series, marketStatus, instInfo, c02Status, isTop100, 
   const sma20Prev = calcSMA(series, 20, n - 2);
   const sma60 = calcSMA(series, 60, n - 1);
   const sma60Prev = calcSMA(series, 60, n - 2);
+  const sma100 = n >= 100 ? calcSMA(series, 100, n - 1) : 0;
+  const sma300 = n >= 300 ? calcSMA(series, 300, n - 1) : 0;
+  const isPPP = sma100 > 0 && sma300 > 0
+    ? (sma5 > sma20 && sma20 > sma60 && sma60 > sma100 && sma100 > sma300)
+    : (sma5 > sma20 && sma20 > sma60);
 
   // 9日連漲/連跌數算 (九日法則)
   let upStreak = 0;
@@ -475,6 +481,19 @@ function analyzeStockRules(series, marketStatus, instInfo, c02Status, isTop100, 
     reasons.push('未同時符合 C01/C08/C09 底線濾網');
   }
 
+  const techJson = JSON.stringify({
+    sma5: Number(sma5.toFixed(2)),
+    sma20: Number(sma20.toFixed(2)),
+    sma60: Number(sma60.toFixed(2)),
+    sma100: sma100 ? Number(sma100.toFixed(2)) : null,
+    sma300: sma300 ? Number(sma300.toFixed(2)) : null,
+    ppp: isPPP ? 'PPP多頭排列' : (isReversePPP ? '逆PPP空頭' : '盤整糾結'),
+    k: Number(kd.k.toFixed(1)),
+    d: Number(kd.d.toFixed(1)),
+    macdDir: macd.hist > macd.prevHist ? '紅柱擴大/翻正' : '動能收斂',
+    upStreak
+  });
+
   return {
     changePct,
     hits,
@@ -484,6 +503,7 @@ function analyzeStockRules(series, marketStatus, instInfo, c02Status, isTop100, 
     limitPrice,
     stopLoss,
     upStreak,
+    techJson,
     sma5: Number(sma5.toFixed(2)),
     sma20: Number(sma20.toFixed(2)),
     sma60: Number(sma60.toFixed(2)),
@@ -736,6 +756,13 @@ function doGet(e) {
     return jsonResponse({ ok: false, error: 'INVALID_PIN' });
   }
 
+  // 單檔 K 線與均線圖表查詢
+  if (e && e.parameter && e.parameter.action === 'getChart') {
+    const code = String(e.parameter.code || '').trim();
+    const bars = getStockChartBars(ss, code, 100);
+    return jsonResponse({ ok: true, code, bars });
+  }
+
   return jsonResponse({
     ok: true,
     config: {
@@ -967,7 +994,12 @@ function updateAndEvaluateMarketIndex(ss, todayStr) {
 }
 
 function updateStatsSummary(ss, wlRows, histByCode) {
-  const logRows = ss.getSheetByName(SHEET_NAMES.DAILY_LOG).getDataRange().getValues().slice(1);
+  const allLogRows = ss.getSheetByName(SHEET_NAMES.DAILY_LOG).getDataRange().getValues().slice(1);
+  // 近 20 個交易日滾動視窗
+  const uniqueDates = [...new Set(allLogRows.map(r => formatDateVal(r[0])))].sort();
+  const rollingDates = new Set(uniqueDates.slice(-20));
+  const logRows = allLogRows.filter(r => rollingDates.has(formatDateVal(r[0])));
+
   const statMap = {};
   logRows.forEach(r => {
     const c = String(r[1]).trim();
@@ -1080,13 +1112,44 @@ function getInstitutionalMap(ss) {
   rows.forEach(r => { map[String(r[0]).trim()] = { consecutiveDays: Number(r[3]) || 0 }; });
   return map;
 }
+function formatDateVal(val) {
+  if (val instanceof Date) return Utilities.formatDate(val, 'Asia/Taipei', 'yyyy-MM-dd');
+  return String(val || '').slice(0, 10);
+}
+function getStockChartBars(ss, code, limit) {
+  const rows = ss.getSheetByName(SHEET_NAMES.HISTORY).getDataRange().getValues().slice(1);
+  const list = [];
+  rows.forEach(r => {
+    if (String(r[1]).trim() === code) {
+      list.push({
+        time: formatDateVal(r[0]),
+        open: Number(r[2]),
+        high: Number(r[3]),
+        low: Number(r[4]),
+        close: Number(r[5]),
+        volume: Number(r[6])
+      });
+    }
+  });
+  list.sort((a, b) => a.time.localeCompare(b.time));
+  // 計算 5/20/60 日線後截取最後 limit 筆
+  const withMa = list.map((b, idx) => ({
+    ...b,
+    sma5: idx >= 4 ? Number(calcSMA(list, 5, idx).toFixed(2)) : null,
+    sma20: idx >= 19 ? Number(calcSMA(list, 20, idx).toFixed(2)) : null,
+    sma60: idx >= 59 ? Number(calcSMA(list, 60, idx).toFixed(2)) : null
+  }));
+  return withMa.slice(-(limit || 100));
+}
 function getSheetObjects(ss, name) {
   const rows = ss.getSheetByName(name).getDataRange().getValues();
   if (rows.length <= 1) return [];
   const headers = rows[0];
   return rows.slice(1).map(r => {
     const obj = {};
-    headers.forEach((h, i) => { obj[h] = r[i]; });
+    headers.forEach((h, i) => {
+      obj[h] = (r[i] instanceof Date) ? formatDateVal(r[i]) : r[i];
+    });
     return obj;
   });
 }
@@ -1096,16 +1159,18 @@ function getLatestMarketStatus(ss) {
   const last = rows[rows.length - 1];
   const tone = String(last[6] || '震盪整理');
   const cashAdvice = tone === '空頭警戒' ? '50% 以上' : (tone === '偏多格局' ? '30% 以上' : '35%~45%');
-  return { date: String(last[0]), close: last[1], changePct: last[2], sma5: last[3], sma20: last[4], sma60: last[5], tone, cashAdvice };
+  return { date: formatDateVal(last[0]), close: last[1], changePct: last[2], sma5: last[3], sma20: last[4], sma60: last[5], tone, cashAdvice };
 }
 function getLatestDailyLogs(ss) {
   const rows = ss.getSheetByName(SHEET_NAMES.DAILY_LOG).getDataRange().getValues();
   if (rows.length <= 1) return [];
-  const latestDate = String(rows[rows.length - 1][0]);
+  const latestDate = formatDateVal(rows[rows.length - 1][0]);
   const headers = rows[0];
-  return rows.slice(1).filter(r => String(r[0]) === latestDate).map(r => {
+  return rows.slice(1).filter(r => formatDateVal(r[0]) === latestDate).map(r => {
     const obj = {};
-    headers.forEach((h, i) => { obj[h] = r[i]; });
+    headers.forEach((h, i) => {
+      obj[h] = (r[i] instanceof Date) ? formatDateVal(r[i]) : r[i];
+    });
     return obj;
   });
 }
