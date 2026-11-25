@@ -193,17 +193,18 @@ function runDailyAfterHoursScan() {
   const cfg = getConfigMap(ss);
   const todayStr = Utilities.formatDate(new Date(), 'Asia/Taipei', 'yyyy-MM-dd');
 
-  // 1. 取得大盤加權指數最新資料
-  const marketStatus = updateAndEvaluateMarketIndex(ss, todayStr);
-  if (!marketStatus.isTradingDay) {
+  // 1. 優先抓取指定今日日期的 TWSE 與 TPEx 全市場收盤總表 + 估值(PE/Yield/PB)
+  const twseAll = fetchTwseAllQuotes(todayStr);
+  const tpexAll = fetchTpexAllQuotes();
+  const valuationAll = fetchTwseValuationAll();
+
+  // 2. 取得大盤加權指數最新資料（若 TWSE 今日已有資料，允許 Yahoo ^TWII 使用 meta 最新價補齊）
+  const hasTwseToday = Object.keys(twseAll).length > 50;
+  const marketStatus = updateAndEvaluateMarketIndex(ss, todayStr, hasTwseToday);
+  if (!marketStatus.isTradingDay && !hasTwseToday) {
     Logger.log(todayStr + ' 非台股交易日或尚未收盤，略過掃描。');
     return;
   }
-
-  // 2. 一次抓取 TWSE 與 TPEx 全市場當日收盤總表 + 估值(PE/Yield/PB)
-  const twseAll = fetchTwseAllQuotes();
-  const tpexAll = fetchTpexAllQuotes();
-  const valuationAll = fetchTwseValuationAll();
 
   // 計算當日全市場成交量前 100 名 (C07)
   const top100Set = buildTop100VolumeSet(twseAll, tpexAll);
@@ -895,12 +896,42 @@ function jsonResponse(obj) {
 }
 
 // ==================== 11. 資料抓取與技術運算輔助函式 ====================
-function fetchTwseAllQuotes() {
+function fetchTwseAllQuotes(todayStr) {
   const map = {};
+  const ymd = (todayStr || Utilities.formatDate(new Date(), 'Asia/Taipei', 'yyyy-MM-dd')).replace(/-/g, '');
+  // 1. 優先呼叫帶明確日期的 TWSE MI_INDEX，確保一定是今日最新收盤價量
+  try {
+    const miUrl = `https://www.twse.com.tw/rwd/zh/afterTrading/MI_INDEX?date=${ymd}&type=ALLBUT0999&response=json`;
+    const res = UrlFetchApp.fetch(miUrl, { muteHttpExceptions: true });
+    const json = JSON.parse(res.getContentText());
+    if (json.stat === 'OK' && Array.isArray(json.tables)) {
+      const targetTable = json.tables.find(t => t.data && t.fields && t.fields.includes('證券代號') && t.fields.includes('收盤價'));
+      if (targetTable) {
+        targetTable.data.forEach(row => {
+          const code = String(row[0]).trim();
+          const close = parseFloat(String(row[8] || '').replace(/,/g, ''));
+          if (!isNaN(close) && close > 0) {
+            const open = parseFloat(String(row[5] || '').replace(/,/g, '')) || close;
+            const high = parseFloat(String(row[6] || '').replace(/,/g, '')) || close;
+            const low = parseFloat(String(row[7] || '').replace(/,/g, '')) || close;
+            const shares = parseInt(String(row[2] || '0').replace(/,/g, ''), 10) || 0;
+            map[code] = { open, high, low, close, volume: Math.round(shares / 1000) };
+          }
+        });
+      }
+    }
+  } catch (e) { Logger.log('MI_INDEX error: ' + e.message); }
+
+  if (Object.keys(map).length > 50) return map;
+
+  // 2. 備援：TWSE STOCK_DAY_ALL (檢查 Date 欄位是否為今日)
   try {
     const res = UrlFetchApp.fetch('https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL', { muteHttpExceptions: true });
     const arr = JSON.parse(res.getContentText());
+    const rocYear = Number(ymd.slice(0, 4)) - 1911;
+    const rocDate = String(rocYear) + ymd.slice(4);
     arr.forEach(item => {
+      if (item.Date && String(item.Date) !== rocDate) return;
       const close = parseFloat(item.ClosingPrice);
       if (!isNaN(close) && close > 0) {
         map[item.Code] = {
@@ -961,12 +992,12 @@ function buildTop100VolumeSet(twseAll, tpexAll) {
   return new Set(list.slice(0, 100).map(x => x.code));
 }
 
-function updateAndEvaluateMarketIndex(ss, todayStr) {
+function updateAndEvaluateMarketIndex(ss, todayStr, forceTodayIfTwseOk) {
   const bars = fetchYahooHistory('^TWII', '1mo');
   if (bars.length === 0) return { isTradingDay: false };
   const latest = bars[bars.length - 1];
-  // 若抓到的最新日期不是今天，代表今日尚未開盤或非交易日
-  if (latest.date !== todayStr) return { isTradingDay: false };
+  // 若抓到的最新日期不是今天且 TWSE 也沒有今日資料，代表非交易日或尚未收盤
+  if (latest.date !== todayStr && !forceTodayIfTwseOk) return { isTradingDay: false };
 
   const mktSheet = ss.getSheetByName(SHEET_NAMES.MARKET_INDEX);
   const rows = mktSheet.getDataRange().getValues().slice(1);
