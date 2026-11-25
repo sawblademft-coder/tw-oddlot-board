@@ -555,12 +555,21 @@
 
   <div id="setupModal" class="modal-backdrop hidden">
     <div class="modal-card">
-      <h2 style="font-size:18px; font-weight:800; margin-bottom:6px;">🔐 連線設定與個人驗證</h2>
-      <p style="font-size:12px; color:#64748b; margin-bottom:14px;">輸入你的 GAS Web App 網址與 PIN 碼以讀取個人持股與每日盤後分析。</p>
-      <div class="field" style="margin-bottom:10px;"><label>GAS Web App 網址</label><input id="cfgGasUrl" placeholder="https://script.google.com/macros/s/.../exec" /></div>
-      <div class="field" style="margin-bottom:14px;"><label>個人 PIN 碼 (預設 1340)</label><input id="cfgPin" type="password" placeholder="輸入 PIN 碼" /></div>
+      <h2 style="font-size:18px; font-weight:800; margin-bottom:6px;">🔐 盤後零股實戰看板登入</h2>
+      <p style="font-size:12px; color:#64748b; margin-bottom:14px;">已預設綁定你的專屬資料庫，只需輸入個人密碼即可登入。</p>
+      <div class="field" style="margin-bottom:12px;">
+        <label>個人密碼 (PIN)</label>
+        <input id="cfgPin" type="password" placeholder="請輸入個人密碼" onkeydown="if(event.key==='Enter')saveConnectionAndLoad()" />
+      </div>
+      <div style="margin-bottom:14px;">
+        <button type="button" onclick="document.getElementById('advGasField').classList.toggle('hidden')" style="border:none; background:transparent; color:#64748b; font-size:11px; font-weight:700; cursor:pointer; padding:0;">⚙️ 進階：更換 GAS API 網址 ▾</button>
+        <div id="advGasField" class="field hidden" style="margin-top:8px;">
+          <label>GAS Web App 網址</label>
+          <input id="cfgGasUrl" placeholder="https://script.google.com/macros/s/.../exec" />
+        </div>
+      </div>
       <div style="display:flex; flex-direction:column; gap:8px;">
-        <button class="btn-primary" onclick="saveConnectionAndLoad()">連線並載入今日資料</button>
+        <button class="btn-primary" onclick="saveConnectionAndLoad()">登入並載入今日資料</button>
         <button class="btn-primary" style="background:#475569;" onclick="enterDemoMode()">先用模擬範例資料預覽看板</button>
         <button id="closeModalBtn" class="btn-sm hidden" style="background:transparent; color:#64748b;" onclick="document.getElementById('setupModal').classList.add('hidden')">取消</button>
       </div>
@@ -568,8 +577,9 @@
   </div>
 
   <script>
+    const DEFAULT_GAS_URL = 'https://script.google.com/macros/s/AKfycbxfCfe6gJ6W5wVwSCEiOOmJZADb31PIpHr-_GHimrmjPm2V_OPAOSvdJqtNZKpyWvdN/exec';
     let APP = {
-      gasUrl: localStorage.getItem('oddlot_gas_url') || '',
+      gasUrl: localStorage.getItem('oddlot_gas_url') || DEFAULT_GAS_URL,
       pin: localStorage.getItem('oddlot_pin') || '',
       isDemo: false,
       cullOnly: false,
@@ -605,16 +615,17 @@
     }
 
     function openSetupModal(allowClose = true) {
-      document.getElementById('cfgGasUrl').value = APP.gasUrl;
+      document.getElementById('cfgGasUrl').value = APP.gasUrl || DEFAULT_GAS_URL;
       document.getElementById('cfgPin').value = APP.pin;
       document.getElementById('closeModalBtn').classList.toggle('hidden', !allowClose);
       document.getElementById('setupModal').classList.remove('hidden');
+      setTimeout(() => document.getElementById('cfgPin').focus(), 100);
     }
 
     function saveConnectionAndLoad() {
-      const url = document.getElementById('cfgGasUrl').value.trim();
+      const url = document.getElementById('cfgGasUrl').value.trim() || DEFAULT_GAS_URL;
       const pin = document.getElementById('cfgPin').value.trim();
-      if (!url || !pin) return alert('請輸入完整的 GAS 網址與 PIN 碼');
+      if (!pin) return alert('請輸入個人密碼');
       APP.gasUrl = url; APP.pin = pin; APP.isDemo = false;
       localStorage.setItem('oddlot_gas_url', url);
       localStorage.setItem('oddlot_pin', pin);
