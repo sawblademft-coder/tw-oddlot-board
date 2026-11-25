@@ -420,6 +420,25 @@
     </section>
     <!-- ==================== 分頁 5：操作規律與實戰 SOP 流程 ==================== -->
     <section id="tab-sop" class="tab-pane">
+      <!-- 目前套用的操作條件與系統設定 -->
+      <div class="panel-grid two-col" style="margin-bottom:14px;">
+        <div class="card-light">
+          <div class="card-title-row">
+            <div class="card-title">⚙️ 目前資金與風控參數設定</div>
+            <span class="badge badge-light-warn" id="sopModeBadge">模擬練習倉</span>
+          </div>
+          <div id="sopConfigGrid" style="display:grid; grid-template-columns:repeat(2, 1fr); gap:8px; font-size:12px;"></div>
+        </div>
+
+        <div class="card-dark">
+          <div class="card-title-row">
+            <div class="card-title">🎛️ 目前選股與排除條件設定（即時同步）</div>
+            <span class="badge badge-watch" id="sopFilterCount">-</span>
+          </div>
+          <div id="sopFiltersList" style="display:flex; flex-direction:column; gap:6px; max-height:220px; overflow-y:auto; font-size:12px;"></div>
+        </div>
+      </div>
+
       <div class="card-dark" style="margin-bottom:14px;">
         <div class="card-title-row">
           <div class="card-title">⏱️ 每日盤後零股自動化時間軸（13:30 ～ 15:30）</div>
@@ -686,6 +705,57 @@
       renderTodayLists();
       renderHoldingsAndJournal();
       renderStatsTable();
+      renderSopOverview();
+    }
+
+    function renderSopOverview() {
+      const cfg = APP.config;
+      const isPaper = cfg.tradingMode === 'PAPER';
+      const badge = document.getElementById('sopModeBadge');
+      if (badge) badge.textContent = isPaper ? '模擬練習倉 (PAPER)' : '實戰模式 (REAL)';
+
+      const cap = Number(cfg.totalCapital || 100000);
+      const riskAmt = Math.round(cap * Number(cfg.riskPct || 0.01));
+      const maxSingleAmt = Math.round(cap * Number(cfg.maxSinglePct || 0.24));
+      const stage1Amt = Math.round(maxSingleAmt / 3);
+
+      const cfgItems = [
+        { k: '總操作資金', v: '$' + cap.toLocaleString() },
+        { k: '單筆最大虧損', v: `${(Number(cfg.riskPct||0.01)*100).toFixed(1)}% ($${riskAmt.toLocaleString()})` },
+        { k: '單檔滿倉上限', v: `${Math.round(Number(cfg.maxSinglePct||0.24)*100)}% ($${maxSingleAmt.toLocaleString()})` },
+        { k: '單批試單(1/3倉)', v: '$' + stage1Amt.toLocaleString() + ' 上限' },
+        { k: '最低保留現金', v: Math.round(Number(cfg.minCashPct||0.3)*100) + '% 以上' },
+        { k: '同時持股上限', v: (cfg.maxHoldings || 4) + ' 檔' },
+        { k: '停損空間設定', v: '前低/月線下 6%～8%' },
+        { k: '自動排程與下單', v: '13:38掃描 / 14:30限價' }
+      ];
+      const grid = document.getElementById('sopConfigGrid');
+      if (grid) {
+        grid.innerHTML = cfgItems.map(x => `
+          <div style="background:#f8fafc; padding:8px 10px; border-radius:10px; border:1px solid #e2e8f0;">
+            <div style="font-size:11px; color:#64748b; font-weight:700;">${x.k}</div>
+            <div style="font-size:13px; font-weight:800; color:#0f172a; margin-top:2px;">${x.v}</div>
+          </div>
+        `).join('');
+      }
+
+      const fltBox = document.getElementById('sopFiltersList');
+      const fltCount = document.getElementById('sopFilterCount');
+      if (fltBox) {
+        const onCount = APP.filters.filter(f => f.Enabled).length;
+        if (fltCount) fltCount.textContent = `已開啟 ${onCount} / ${APP.filters.length} 項`;
+        fltBox.innerHTML = APP.filters.length === 0
+          ? `<div style="color:#94a3b8;">請先連線 GAS 或進入範例模式以顯示條件清單。</div>`
+          : APP.filters.map(f => `
+            <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; padding:6px 10px; border-radius:9px; background:rgba(255,255,255,0.05);">
+              <div>
+                <span style="font-weight:800;">${f.Name}</span>
+                <div style="font-size:11px; color:#94a3b8;">${f.Description}</div>
+              </div>
+              <span class="badge ${f.Enabled ? 'badge-buy' : 'badge-watch'}" style="flex-shrink:0;">${f.Enabled ? 'ON 啟用' : 'OFF 關閉'}</span>
+            </div>
+          `).join('');
+      }
     }
 
     function renderFilterSwitches() {
@@ -701,12 +771,13 @@
       if (f) f.Enabled = val;
       document.getElementById('activeFilterSummary').textContent = '已自訂條件';
       renderTodayLists();
+      renderSopOverview();
     }
     function resetDefaultFilters() {
       const defaults = new Set(['C08', 'C09', 'C01', 'EXCL_9DAY', 'EXCL_UPPER_SHADOW', 'SHOW_ANTI']);
       APP.filters.forEach(f => { f.Enabled = defaults.has(f.FilterId); });
       document.getElementById('activeFilterSummary').textContent = '手冊標準';
-      renderFilterSwitches(); renderTodayLists();
+      renderFilterSwitches(); renderTodayLists(); renderSopOverview();
     }
     async function saveFiltersToGas() {
       if (APP.isDemo) return alert('範例預覽模式無法儲存至雲端。');
