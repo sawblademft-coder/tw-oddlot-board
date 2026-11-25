@@ -338,6 +338,8 @@ function runDailyAfterHoursScan() {
 
   // 8. 預約明日 13:38 精準觸發（週一到週五）
   scheduleNextDailyTrigger();
+
+  return { date: todayStr, count: dailyLogRows.length, appendedHistory: appendHistRows.length };
 }
 
 // ==================== 5. 技術指標與手冊規則引擎 ====================
@@ -883,8 +885,8 @@ function doPost(e) {
     }
 
     if (action === 'manualScan') {
-      runDailyAfterHoursScan();
-      return jsonResponse({ ok: true });
+      const summary = runDailyAfterHoursScan();
+      return jsonResponse({ ok: true, summary });
     }
 
     return jsonResponse({ ok: false, error: 'UNKNOWN_ACTION' });

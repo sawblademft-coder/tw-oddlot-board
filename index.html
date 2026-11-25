@@ -643,12 +643,18 @@
       const btn = document.getElementById('manualScanBtn');
       btn.textContent = '⏳ 掃描中...'; btn.disabled = true;
       try {
-        await fetch(APP.gasUrl, {
+        const res = await fetch(APP.gasUrl, {
           method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' },
           body: JSON.stringify({ pin: APP.pin, action: 'manualScan' })
         });
+        const resData = await res.json();
+        if (!resData.ok) {
+          alert('後端掃描錯誤：' + (resData.error || '未知錯誤'));
+          return;
+        }
         await fetchDashboardData();
-        alert('盤後掃描與滾動統計更新完成！');
+        const s = resData.summary || {};
+        alert(`盤後掃描完成！日期：${s.date || '-'}，更新 ${s.count || 0} 檔標的。`);
       } catch (e) {
         alert('掃描失敗：' + e.message);
       } finally {
