@@ -69,7 +69,7 @@ function initSystem() {
       ['C02', 'C02 財報與法人連買5日', '籌碼保護', false, '財報體質穩健且外資/投信連買5日以上'],
       ['C07', 'C07 市場熱門前百名', '熱度加分', false, '名列當日台股成交量前 100 名'],
       ['NAKED_K', '裸K雙重共振 (下半身/鳥嘴/吞噬/晨星)', '共振加分', false, '出現相場師朗下半身、鳥嘴或酒田轉折訊號'],
-      ['EXCL_9DAY', '排除九日法則過熱 (連漲>=8根)', '警訊排除', true, '自動排除連續上漲接近第9根K線之過熱標的'],
+      ['EXCL_9DAY', '排除連漲過熱 (連漲>=2根)', '警訊排除', true, '自動排除連續上漲>=2根K線之短線過熱標的'],
       ['EXCL_UPPER_SHADOW', '排除爆量長上影線 / 夜星', '警訊排除', true, '自動排除高檔爆量留長上影線或夜星反轉標的'],
       ['SHOW_ANTI', '顯示空頭/高檔反指標對照組', '對照觀察', true, '在清單中標記逆PPP或高檔過熱股作為避雷參考']
     ];
@@ -193,34 +193,46 @@ function runDailyAfterHoursScan() {
   const cfg = getConfigMap(ss);
   const todayStr = Utilities.formatDate(new Date(), 'Asia/Taipei', 'yyyy-MM-dd');
 
-  // 1. 優先抓取指定今日日期的 TWSE 與 TPEx 全市場收盤總表 + 估值(PE/Yield/PB)
+  // 0. 同步更新 Filter_Settings 的 EXCL_9DAY 文字說明 (>=2根)
+  try {
+    const fSheet = ss.getSheetByName(SHEET_NAMES.FILTERS);
+    const fRows = fSheet.getDataRange().getValues();
+    for (let i = 1; i < fRows.length; i++) {
+      if (fRows[i][0] === 'EXCL_9DAY') {
+        fSheet.getRange(i + 1, 2).setValue('排除連漲過熱 (連漲>=2根)');
+        fSheet.getRange(i + 1, 5).setValue('自動排除連續上漲>=2根K線之短線過熱標的');
+        break;
+      }
+    }
+  } catch (e) {}
+
+  // 1. 抓取估值(PE/Yield/PB) 與 TWSE/TPEx 總表(用於 C07 熱門前百名)
   const twseAll = fetchTwseAllQuotes(todayStr);
   const tpexAll = fetchTpexAllQuotes();
   const valuationAll = fetchTwseValuationAll();
-
-  // 2. 取得大盤加權指數最新資料（若 TWSE 今日已有資料，允許 Yahoo ^TWII 使用 meta 最新價補齊）
-  const hasTwseToday = Object.keys(twseAll).length > 50;
-  const marketStatus = updateAndEvaluateMarketIndex(ss, todayStr, hasTwseToday);
-  if (!marketStatus.isTradingDay && !hasTwseToday) {
-    Logger.log(todayStr + ' 非台股交易日或尚未收盤，略過掃描。');
-    return;
-  }
-
-  // 計算當日全市場成交量前 100 名 (C07)
   const top100Set = buildTop100VolumeSet(twseAll, tpexAll);
 
-  // 3. 讀取 Watchlist, History, Institutional
+  // 2. 讀取 Watchlist 並用 Yahoo Finance 並發抓取 100 檔近5日最新K線 (最穩、無快取延遲)
   const wlRows = ss.getSheetByName(SHEET_NAMES.WATCHLIST).getDataRange().getValues().slice(1);
+  const yahooLatestMap = fetchYahooLatestQuotesBatch(wlRows);
+
+  // 3. 更新大盤加權指數
+  const marketStatus = updateAndEvaluateMarketIndex(ss, todayStr, Object.keys(yahooLatestMap).length > 50);
+  const scanDateStr = marketStatus.date || todayStr;
+
+  // 4. 讀取 History, Institutional
   const histSheet = ss.getSheetByName(SHEET_NAMES.HISTORY);
   const histRows = histSheet.getDataRange().getValues().slice(1);
   const instMap = getInstitutionalMap(ss);
 
   // 建立依代號分組的歷史陣列（用 Map 依日期去重並排序）
   const histByCode = {};
+  const existingDateKeys = new Set();
   histRows.forEach(r => {
     const c = String(r[1]).trim();
     const dStr = formatDateVal(r[0]);
     if (!c || !dStr) return;
+    existingDateKeys.add(c + '_' + dStr);
     if (!histByCode[c]) histByCode[c] = {};
     histByCode[c][dStr] = {
       date: dStr,
@@ -230,9 +242,6 @@ function runDailyAfterHoursScan() {
       close: Number(r[5]),
       volume: Number(r[6])
     };
-  });
-  Object.keys(histByCode).forEach(c => {
-    histByCode[c] = Object.values(histByCode[c]).sort((a, b) => a.date.localeCompare(b.date));
   });
 
   const appendHistRows = [];
@@ -249,32 +258,25 @@ function runDailyAfterHoursScan() {
     const active = w[6] !== false && String(w[6]).toUpperCase() !== 'FALSE';
     if (!code || !active) return;
 
-    const quote = market === 'TPEX' ? tpexAll[code] : twseAll[code];
-    if (!quote || !quote.close) return;
-
     const val = valuationAll[code] || { pe: '', yield: '', pb: '' };
-    const series = histByCode[code] || [];
+    if (!histByCode[code]) histByCode[code] = {};
 
-    // 避免同一天重複寫入
-    if (series.length === 0 || series[series.length - 1].date !== todayStr) {
-      const newBar = {
-        date: todayStr,
-        open: quote.open,
-        high: quote.high,
-        low: quote.low,
-        close: quote.close,
-        volume: quote.volume
-      };
-      series.push(newBar);
-      appendHistRows.push([todayStr, code, quote.open, quote.high, quote.low, quote.close, quote.volume, val.pe, val.yield, val.pb]);
-    } else {
-      // 更新當日最後一筆
-      series[series.length - 1] = {
-        date: todayStr, open: quote.open, high: quote.high, low: quote.low, close: quote.close, volume: quote.volume
-      };
-    }
+    // 將 Yahoo 近 5 日最新K線合併進 histByCode，確保今天與昨天 100% 連續且最新
+    const yBars = yahooLatestMap[code] || [];
+    yBars.forEach(b => {
+      histByCode[code][b.date] = b;
+      if (!existingDateKeys.has(code + '_' + b.date)) {
+        existingDateKeys.add(code + '_' + b.date);
+        appendHistRows.push([b.date, code, b.open, b.high, b.low, b.close, b.volume, val.pe, val.yield, val.pb]);
+      }
+    });
 
-    if (series.length < 62) return; // 至少需 60 日均線
+    const series = Object.values(histByCode[code]).sort((a, b) => a.date.localeCompare(b.date));
+    histByCode[code] = series;
+    if (series.length < 62) return;
+
+    const latestBar = series[series.length - 1];
+    const quote = latestBar;
 
     // 計算技術指標與規則判定
     const instInfo = instMap[code] || { consecutiveDays: 0 };
@@ -439,7 +441,7 @@ function analyzeStockRules(series, marketStatus, instInfo, c02Status, isTop100, 
   if (isBullEngulfing) hits.push('多頭吞噬');
   if (isMorningStar) hits.push('晨星');
   if (isLongLowerShadow) hits.push('長下影線');
-  if (upStreak >= 8) hits.push('EXCL_9DAY');
+  if (upStreak >= 2) hits.push('EXCL_9DAY');
   if (isHighUpperShadow) hits.push('EXCL_UPPER_SHADOW');
   if (isReversePPP) hits.push('逆PPP');
   if (isHalfBodyDown) hits.push('反下半身');
@@ -464,7 +466,7 @@ function analyzeStockRules(series, marketStatus, instInfo, c02Status, isTop100, 
   const reasons = [];
 
   const hasResonance = c04 || isHalfBodyUp || isBirdBeak || isBullEngulfing || isMorningStar;
-  const hasExclusion = upStreak >= 8 || isHighUpperShadow;
+  const hasExclusion = upStreak >= 2 || isHighUpperShadow;
 
   if (isReversePPP || (isHalfBodyDown && today.close < sma20)) {
     action = '反指標警戒';
@@ -472,7 +474,7 @@ function analyzeStockRules(series, marketStatus, instInfo, c02Status, isTop100, 
     if (isHalfBodyDown) reasons.push('出現反下半身跌破5日線，短線轉弱');
   } else if (hasExclusion) {
     action = '反指標警戒';
-    if (upStreak >= 8) reasons.push(`連漲第${upStreak}根K線(九日法則)，高檔過熱不追`);
+    if (upStreak >= 2) reasons.push(`連漲第${upStreak}根K線(>=2根過熱)，短線不追高`);
     if (isHighUpperShadow) reasons.push('爆量留長上影線，高檔遇賣壓');
   } else if (c08 && c09 && c01 && hasResonance) {
     action = '試單買進';
@@ -896,6 +898,55 @@ function jsonResponse(obj) {
 }
 
 // ==================== 11. 資料抓取與技術運算輔助函式 ====================
+function fetchYahooLatestQuotesBatch(wlRows) {
+  const resultMap = {};
+  const targets = [];
+  wlRows.forEach(w => {
+    const code = String(w[0]).trim();
+    const market = String(w[3]).trim();
+    const active = w[6] !== false && String(w[6]).toUpperCase() !== 'FALSE';
+    if (code && active) {
+      targets.push({ code, symbol: code + (market === 'TPEX' ? '.TWO' : '.TW') });
+    }
+  });
+
+  // 每批 25 檔使用 fetchAll 並發抓取近 5 日K線
+  for (let i = 0; i < targets.length; i += 25) {
+    const chunk = targets.slice(i, i + 25);
+    const reqs = chunk.map(t => ({
+      url: `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(t.symbol)}?range=5d&interval=1d`,
+      muteHttpExceptions: true
+    }));
+    try {
+      const responses = UrlFetchApp.fetchAll(reqs);
+      responses.forEach((res, idx) => {
+        if (res.getResponseCode() !== 200) return;
+        const json = JSON.parse(res.getContentText());
+        const r = json.chart && json.chart.result && json.chart.result[0];
+        if (!r || !r.timestamp) return;
+        const ts = r.timestamp;
+        const q = r.indicators.quote[0];
+        const bars = [];
+        for (let j = 0; j < ts.length; j++) {
+          if (q.close[j] == null || q.open[j] == null) continue;
+          const dStr = Utilities.formatDate(new Date(ts[j] * 1000), 'Asia/Taipei', 'yyyy-MM-dd');
+          bars.push({
+            date: dStr,
+            open: Number(q.open[j].toFixed(2)),
+            high: Number(q.high[j].toFixed(2)),
+            low: Number(q.low[j].toFixed(2)),
+            close: Number(q.close[j].toFixed(2)),
+            volume: Math.round((q.volume[j] || 0) / 1000)
+          });
+        }
+        resultMap[chunk[idx].code] = bars;
+      });
+    } catch (e) { Logger.log('fetchAll batch error: ' + e.message); }
+    Utilities.sleep(100);
+  }
+  return resultMap;
+}
+
 function fetchTwseAllQuotes(todayStr) {
   const map = {};
   const ymd = (todayStr || Utilities.formatDate(new Date(), 'Asia/Taipei', 'yyyy-MM-dd')).replace(/-/g, '');
@@ -1218,7 +1269,7 @@ function getLatestDailyLogs(ss) {
 function removeRowsByDate(sheet, dateStr) {
   const rows = sheet.getDataRange().getValues();
   for (let i = rows.length - 1; i >= 1; i--) {
-    if (String(rows[i][0]) === dateStr) sheet.deleteRow(i + 1);
+    if (formatDateVal(rows[i][0]) === dateStr) sheet.deleteRow(i + 1);
   }
 }
 
