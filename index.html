@@ -4,6 +4,8 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
   <title>盤後零股實戰看板</title>
+  <link rel="icon" type="image/png" href="./logo.png" />
+  <link rel="apple-touch-icon" href="./logo.png" />
   <link rel="manifest" href="./manifest.json" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
@@ -50,10 +52,9 @@
     }
     .brand { display: flex; align-items: center; gap: 10px; }
     .brand-icon {
-      width: 34px; height: 34px; border-radius: 10px;
-      background: var(--w-blue); color: #fff;
-      display: grid; place-items: center; font-weight: 800; font-size: 16px;
-      box-shadow: 0 4px 10px rgba(29, 107, 243, 0.3); flex-shrink: 0;
+      width: 36px; height: 36px; border-radius: 9px;
+      object-fit: cover;
+      box-shadow: 0 4px 10px rgba(15, 23, 42, 0.22); flex-shrink: 0;
     }
     .brand-title { font-size: 17px; font-weight: 800; letter-spacing: -0.3px; }
     .brand-sub { font-size: 11px; color: #475569; font-weight: 600; }
@@ -235,7 +236,7 @@
 
   <header class="topbar">
     <div class="brand">
-      <div class="brand-icon">零</div>
+      <img src="./logo.png" alt="Logo" class="brand-icon" />
       <div>
         <div class="brand-title">盤後零股實戰看板</div>
         <div class="brand-sub" id="lastSyncText">13:40–14:30 盤後零股｜紀律大於預測</div>
