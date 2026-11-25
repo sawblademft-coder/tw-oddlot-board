@@ -1,0 +1,1011 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>盤後零股實戰看板</title>
+  <link rel="manifest" href="./manifest.json" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <style>
+    :root {
+      --bg-grad: linear-gradient(145deg, #b8c6ec 0%, #d8c7f0 48%, #f0c9dc 100%);
+      --card-dark: rgba(24, 26, 34, 0.90);
+      --card-light: rgba(255, 255, 255, 0.92);
+      --w-blue: linear-gradient(135deg, #1d6bf3, #0b4fd4);
+      --w-red: linear-gradient(135deg, #e13b2f, #be2418);
+      --w-green: linear-gradient(135deg, #16a34a, #0e7c38);
+      --w-amber: linear-gradient(135deg, #eab308, #ca8a04);
+      --w-black: linear-gradient(135deg, #1f222a, #0b0c10);
+      --tw-up: #ef4444;    /* 台股紅漲 */
+      --tw-down: #22c55e;  /* 台股綠跌 */
+      --tw-up-dark: #dc2626;
+      --tw-down-dark: #16a34a;
+      --radius-lg: 22px;
+      --radius-md: 16px;
+      --shadow: 0 10px 28px rgba(15, 23, 42, 0.14);
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang TC", "Microsoft JhengHei", sans-serif;
+      background: var(--bg-grad);
+      background-attachment: fixed;
+      color: #0f172a;
+      min-height: 100vh;
+      padding-bottom: 84px;
+    }
+
+    /* 頂部列 */
+    .topbar {
+      position: sticky;
+      top: 0;
+      z-index: 40;
+      backdrop-filter: blur(18px);
+      -webkit-backdrop-filter: blur(18px);
+      background: rgba(255, 255, 255, 0.55);
+      border-bottom: 1px solid rgba(255, 255, 255, 0.6);
+      padding: 12px 18px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+    }
+    .brand { display: flex; align-items: center; gap: 10px; }
+    .brand-icon {
+      width: 36px; height: 36px; border-radius: 11px;
+      background: var(--w-blue); color: #fff;
+      display: grid; place-items: center; font-weight: 800; font-size: 17px;
+      box-shadow: 0 4px 10px rgba(29, 107, 243, 0.3);
+    }
+    .brand-title { font-size: 18px; font-weight: 800; letter-spacing: -0.3px; color: #0f172a; }
+    .brand-sub { font-size: 11px; color: #475569; font-weight: 600; }
+
+    .top-actions { display: flex; align-items: center; gap: 8px; }
+    .pill-btn {
+      border: none; border-radius: 999px; padding: 7px 13px; font-size: 12px; font-weight: 700;
+      cursor: pointer; transition: transform .12s, opacity .12s;
+      display: inline-flex; align-items: center; gap: 5px;
+    }
+    .pill-btn:active { transform: scale(0.96); }
+    .pill-mode-paper { background: #fef3c7; color: #92400e; }
+    .pill-mode-real { background: #fee2e2; color: #991b1b; }
+    .pill-dark { background: #1e293b; color: #fff; }
+    .pill-light { background: rgba(255,255,255,0.85); color: #1e293b; }
+
+    /* 電腦版分頁導覽 */
+    .desktop-nav {
+      display: none;
+      gap: 6px;
+      background: rgba(255,255,255,0.55);
+      padding: 4px;
+      border-radius: 999px;
+    }
+    .desktop-nav button {
+      border: none; background: transparent; padding: 7px 14px; border-radius: 999px;
+      font-size: 13px; font-weight: 700; color: #475569; cursor: pointer;
+    }
+    .desktop-nav button.active { background: #0f172a; color: #fff; }
+
+    /* 主容器 */
+    .container { max-width: 1100px; margin: 0 auto; padding: 16px; }
+
+    /* Widget 格線 (參考圖三高對比小工具) */
+    .widget-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+    @media (min-width: 768px) {
+      .widget-grid { grid-template-columns: repeat(4, 1fr); gap: 14px; }
+      .desktop-nav { display: flex; }
+      .bottom-nav { display: none !important; }
+      body { padding-bottom: 28px; }
+    }
+
+    .widget {
+      border-radius: var(--radius-lg);
+      padding: 15px 16px;
+      color: #fff;
+      box-shadow: var(--shadow);
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      min-height: 114px;
+      position: relative;
+      overflow: hidden;
+    }
+    .widget.w-blue { background: var(--w-blue); }
+    .widget.w-red { background: var(--w-red); }
+    .widget.w-green { background: var(--w-green); }
+    .widget.w-amber { background: var(--w-amber); color: #1c1917; }
+    .widget.w-black { background: var(--w-black); }
+
+    .w-head { display: flex; justify-content: space-between; align-items: center; font-size: 12px; font-weight: 700; opacity: 0.92; }
+    .w-val { font-size: 25px; font-weight: 800; letter-spacing: -0.5px; margin: 6px 0 4px; line-height: 1.15; }
+    .w-foot { display: flex; justify-content: space-between; font-size: 11px; font-weight: 700; opacity: 0.9; }
+
+    /* 圖三風格清單卡片 */
+    .panel-grid { display: grid; grid-template-columns: 1fr; gap: 14px; }
+    @media (min-width: 900px) {
+      .panel-grid.two-col { grid-template-columns: 1.15fr 0.85fr; align-items: start; }
+    }
+
+    .card-dark {
+      background: var(--card-dark);
+      color: #f8fafc;
+      border-radius: var(--radius-lg);
+      padding: 16px;
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(14px);
+    }
+    .card-light {
+      background: var(--card-light);
+      color: #0f172a;
+      border-radius: var(--radius-lg);
+      padding: 16px;
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(14px);
+    }
+
+    .card-title-row {
+      display: flex; align-items: center; justify-content: space-between; gap: 10px;
+      margin-bottom: 12px; padding-bottom: 10px;
+      border-bottom: 1px solid rgba(148, 163, 184, 0.22);
+    }
+    .card-title { font-size: 15px; font-weight: 800; display: flex; align-items: center; gap: 7px; }
+    .badge {
+      display: inline-flex; align-items: center; padding: 3px 8px; border-radius: 999px;
+      font-size: 11px; font-weight: 800;
+    }
+    .badge-buy { background: rgba(239, 68, 68, 0.18); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.35); }
+    .badge-watch { background: rgba(59, 130, 246, 0.18); color: #60a5fa; }
+    .badge-anti { background: rgba(34, 197, 94, 0.18); color: #4ade80; border: 1px solid rgba(34, 197, 94, 0.35); }
+    .badge-light-buy { background: #fee2e2; color: #b91c1c; }
+    .badge-light-anti { background: #dcfce7; color: #15803d; }
+    .badge-light-warn { background: #fef3c7; color: #92400e; }
+
+    /* 清單項目 */
+    .stock-item {
+      padding: 12px;
+      border-radius: var(--radius-md);
+      background: rgba(255, 255, 255, 0.05);
+      margin-bottom: 9px;
+      cursor: pointer;
+      transition: background .15s;
+    }
+    .stock-item:hover { background: rgba(255, 255, 255, 0.09); }
+    .card-light .stock-item { background: #f8fafc; border: 1px solid #e2e8f0; }
+    .card-light .stock-item:hover { background: #f1f5f9; }
+
+    .stock-top { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+    .stock-name { font-size: 15px; font-weight: 800; }
+    .stock-code { font-size: 12px; opacity: 0.7; font-weight: 700; margin-left: 4px; }
+    .stock-price { text-align: right; font-weight: 800; font-size: 15px; }
+    .up { color: var(--tw-up); }
+    .down { color: var(--tw-down); }
+    .card-light .up { color: var(--tw-up-dark); }
+    .card-light .down { color: var(--tw-down-dark); }
+
+    .stock-sub {
+      display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center;
+      margin-top: 6px; font-size: 12px; gap: 6px;
+    }
+    .stock-detail {
+      display: none;
+      margin-top: 10px; padding-top: 10px;
+      border-top: 1px dashed rgba(148, 163, 184, 0.3);
+      font-size: 12px; line-height: 1.6;
+    }
+    .stock-item.open .stock-detail { display: block; }
+
+    .tag-row { display: flex; flex-wrap: wrap; gap: 5px; margin: 6px 0; }
+    .tag {
+      font-size: 11px; font-weight: 700; padding: 2px 7px; border-radius: 6px;
+      background: rgba(148, 163, 184, 0.2);
+    }
+
+    /* 獨立條件開關 */
+    .filter-grid { display: grid; grid-template-columns: 1fr; gap: 8px; }
+    @media (min-width: 600px) { .filter-grid { grid-template-columns: repeat(2, 1fr); } }
+    .filter-row {
+      display: flex; align-items: center; justify-content: space-between; gap: 10px;
+      padding: 9px 12px; border-radius: 12px; background: rgba(255,255,255,0.06);
+    }
+    .card-light .filter-row { background: #f1f5f9; }
+    .switch { position: relative; display: inline-block; width: 42px; height: 24px; flex-shrink: 0; }
+    .switch input { opacity: 0; width: 0; height: 0; }
+    .slider {
+      position: absolute; cursor: pointer; inset: 0; background: #64748b;
+      border-radius: 24px; transition: .2s;
+    }
+    .slider:before {
+      content: ""; position: absolute; height: 18px; width: 18px; left: 3px; bottom: 3px;
+      background: #fff; border-radius: 50%; transition: .2s;
+    }
+    input:checked + .slider { background: #2563eb; }
+    input:checked + .slider:before { transform: translateX(18px); }
+
+    /* 防呆警告條 */
+    .alert-banner {
+      border-radius: var(--radius-md); padding: 11px 14px; margin-bottom: 14px;
+      font-size: 13px; font-weight: 700; display: flex; align-items: center; gap: 8px;
+      background: rgba(239, 68, 68, 0.16); color: #991b1b; border: 1px solid rgba(239, 68, 68, 0.35);
+    }
+
+    /* 表單與輸入 */
+    .form-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+    .field label { display: block; font-size: 11px; font-weight: 700; color: #475569; margin-bottom: 4px; }
+    .field input, .field select {
+      width: 100%; padding: 9px 11px; border-radius: 10px; border: 1px solid #cbd5e1;
+      font-size: 14px; font-weight: 600; background: #fff;
+    }
+    .btn-primary {
+      width: 100%; padding: 11px; border: none; border-radius: 12px;
+      background: #1d4ed8; color: #fff; font-size: 14px; font-weight: 800; cursor: pointer;
+    }
+    .btn-sm {
+      padding: 5px 10px; border-radius: 8px; border: none; font-size: 12px; font-weight: 700; cursor: pointer;
+    }
+
+    /* 表格 */
+    .table-wrap { overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    th, td { padding: 9px 8px; text-align: left; border-bottom: 1px solid #e2e8f0; white-space: nowrap; }
+    th { font-weight: 800; color: #475569; background: #f8fafc; }
+
+    /* 手機底部導覽 */
+    .bottom-nav {
+      position: fixed; bottom: 0; left: 0; right: 0; z-index: 45;
+      background: rgba(255, 255, 255, 0.88);
+      backdrop-filter: blur(18px);
+      border-top: 1px solid rgba(203, 213, 225, 0.7);
+      display: grid; grid-template-columns: repeat(4, 1fr);
+      padding: 6px 4px 10px;
+    }
+    .bottom-nav button {
+      border: none; background: transparent; padding: 5px 2px;
+      display: flex; flex-direction: column; align-items: center; gap: 3px;
+      font-size: 11px; font-weight: 700; color: #64748b; cursor: pointer;
+    }
+    .bottom-nav button.active { color: #1d4ed8; }
+
+    /* 登入 / 設定彈窗 */
+    .modal-backdrop {
+      position: fixed; inset: 0; z-index: 100;
+      background: rgba(15, 23, 42, 0.65); backdrop-filter: blur(8px);
+      display: flex; align-items: center; justify-content: center; padding: 18px;
+    }
+    .modal-card {
+      background: #fff; border-radius: 24px; padding: 22px; width: 100%; max-width: 420px;
+      box-shadow: 0 20px 50px rgba(0,0,0,0.25);
+    }
+    .hidden { display: none !important; }
+    .tab-pane { display: none; }
+    .tab-pane.active { display: block; }
+  </style>
+</head>
+<body>
+
+  <!-- 頂部導覽 -->
+  <header class="topbar">
+    <div class="brand">
+      <div class="brand-icon">零</div>
+      <div>
+        <div class="brand-title">盤後零股實戰看板</div>
+        <div class="brand-sub" id="lastSyncText">13:40–14:30 盤後零股｜紀律大於預測</div>
+      </div>
+    </div>
+
+    <nav class="desktop-nav" id="desktopNav">
+      <button class="active" onclick="switchTab('tab-today', this)">今日建議</button>
+      <button onclick="switchTab('tab-check', this)">15分鐘檢核＆試算</button>
+      <button onclick="switchTab('tab-journal', this)">持股與日誌</button>
+      <button onclick="switchTab('tab-stats', this)">100檔統計</button>
+    </nav>
+
+    <div class="top-actions">
+      <button id="modeBadge" class="pill-btn pill-mode-paper" onclick="toggleTradingMode()">模擬練習倉</button>
+      <button class="pill-btn pill-light" onclick="openSetupModal()">⚙️</button>
+    </div>
+  </header>
+
+  <main class="container">
+    <!-- ==================== 分頁 1：今日建議 ==================== -->
+    <section id="tab-today" class="tab-pane active">
+      <!-- 頂部 4 個高對比 Widget -->
+      <div class="widget-grid">
+        <div class="widget w-blue" id="wMarket">
+          <div class="w-head"><span>🇹🇼 加權指數定調</span><span id="mktDate">-</span></div>
+          <div class="w-val" id="mktClose">-</div>
+          <div class="w-foot"><span id="mktTone">載入中</span><span id="mktChg">-</span></div>
+        </div>
+        <div class="widget w-amber">
+          <div class="w-head"><span>💰 建議現金水位</span><span>風控底線</span></div>
+          <div class="w-val" id="cashAdvice">30% 以上</div>
+          <div class="w-foot"><span id="curCashPct">目前剩餘 100%</span><span>上限4檔</span></div>
+        </div>
+        <div class="widget w-red" id="wSignals">
+          <div class="w-head"><span>🎯 今日行動建議</span><span>14:30前掛限價</span></div>
+          <div class="w-val" id="buyCountVal">0 檔</div>
+          <div class="w-foot"><span id="holdAlertCount">持股提醒 0</span><span id="antiCount">警戒 0</span></div>
+        </div>
+        <div class="widget w-black">
+          <div class="w-head"><span>🛡️ 單筆最大虧損</span><span id="riskPctLabel">1.0%</span></div>
+          <div class="w-val" id="riskAmtVal">$1,000</div>
+          <div class="w-foot"><span id="capLabel">總資金 $100,000</span><span>不攤平</span></div>
+        </div>
+      </div>
+
+      <!-- 資金防呆警示條 -->
+      <div id="guardrailBanner" class="alert-banner hidden"></div>
+
+      <!-- 獨立篩選條件開關面板 (可收合) -->
+      <div class="card-dark" style="margin-bottom: 14px;">
+        <div class="card-title-row" style="margin-bottom: 8px; padding-bottom: 8px; cursor:pointer;" onclick="document.getElementById('filterPanelBody').classList.toggle('hidden')">
+          <div class="card-title">🎛️ 篩選條件獨立開關（點擊展開 / 即時重算）</div>
+          <span class="badge badge-watch" id="activeFilterSummary">手冊標準</span>
+        </div>
+        <div id="filterPanelBody" class="hidden">
+          <div class="filter-grid" id="filterSwitches"></div>
+          <div style="display:flex; gap:8px; margin-top:12px;">
+            <button class="btn-sm" style="background:#334155; color:#fff;" onclick="resetDefaultFilters()">恢復手冊標準</button>
+            <button class="btn-sm" style="background:#2563eb; color:#fff;" onclick="saveFiltersToGas()">儲存開關至雲端</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel-grid two-col">
+        <!-- 左欄：今日選股與行動建議清單 -->
+        <div class="card-dark">
+          <div class="card-title-row">
+            <div class="card-title">📋 今日盤後操作建議</div>
+            <select id="actionFilterSelect" onchange="renderTodayLists()" style="background:#1e293b; color:#fff; border:1px solid #475569; border-radius:8px; padding:4px 8px; font-size:12px;">
+              <option value="ACTIONABLE">只看建議買進＋警戒</option>
+              <option value="BUY">只看試單買進</option>
+              <option value="WATCH">含底線觀察追蹤</option>
+              <option value="ALL">顯示全部 100 檔</option>
+            </select>
+          </div>
+          <div id="todayRecommendList"></div>
+        </div>
+
+        <!-- 右欄：持股保姆提醒 ＋ 避雷反指標 -->
+        <div style="display:flex; flex-direction:column; gap:14px;">
+          <div class="card-light">
+            <div class="card-title-row">
+              <div class="card-title">🛡️ 現有持股保姆提醒</div>
+              <span class="badge badge-light-warn" id="holdingModeTag">模擬練習</span>
+            </div>
+            <div id="holdingAlertsList"></div>
+          </div>
+
+          <div class="card-light" id="antiCard">
+            <div class="card-title-row">
+              <div class="card-title">⚠️ 反指標 / 避雷對照組</div>
+              <span class="badge badge-light-anti">不接刀・不追高</span>
+            </div>
+            <div id="antiList"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ==================== 分頁 2：15 分鐘檢核＆試算 ==================== -->
+    <section id="tab-check" class="tab-pane">
+      <div class="panel-grid two-col">
+        <div class="card-light">
+          <div class="card-title-row">
+            <div class="card-title">✅ 每日盤後 15 分鐘打勾檢核表</div>
+            <button class="btn-sm" style="background:#e2e8f0;" onclick="resetChecklist()">重置今日</button>
+          </div>
+          <div id="checklistBox" style="display:flex; flex-direction:column; gap:10px; font-size:13px;"></div>
+        </div>
+
+        <div class="card-light">
+          <div class="card-title-row">
+            <div class="card-title">🧮 先算虧損・零股股數計算機</div>
+            <span class="badge badge-light-buy">1-1-1 散彈槍</span>
+          </div>
+          <div class="form-grid" style="margin-bottom:12px;">
+            <div class="field"><label>總操作資金 (元)</label><input type="number" id="calcCap" value="100000" oninput="runQuickCalc()"></div>
+            <div class="field"><label>單筆風險上限 (%)</label><input type="number" id="calcRisk" value="1.0" step="0.1" oninput="runQuickCalc()"></div>
+            <div class="field"><label>預計限價買進 (元)</label><input type="number" id="calcEntry" value="100" step="0.1" oninput="runQuickCalc()"></div>
+            <div class="field"><label>預設停損價 (約-6~8%)</label><input type="number" id="calcStop" value="93" step="0.1" oninput="runQuickCalc()"></div>
+          </div>
+          <div id="calcResultBox" style="background:#f1f5f9; border-radius:14px; padding:14px; font-size:13px; line-height:1.8;"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ==================== 分頁 3：持股與交易日誌 ==================== -->
+    <section id="tab-journal" class="tab-pane">
+      <div class="panel-grid two-col">
+        <div class="card-light">
+          <div class="card-title-row">
+            <div class="card-title">📦 目前持股部位（<span id="journalModeLabel">模擬練習</span>）</div>
+          </div>
+          <div id="openHoldingsList"></div>
+
+          <hr style="border:none; border-top:1px solid #e2e8f0; margin:16px 0;" />
+          <div class="card-title" style="margin-bottom:10px;">✍️ 手動記錄買賣（盤後成交後登錄）</div>
+          <div class="form-grid">
+            <div class="field"><label>股票代號</label><input id="trCode" placeholder="例如 2330"></div>
+            <div class="field"><label>股票名稱</label><input id="trName" placeholder="例如 台積電"></div>
+            <div class="field"><label>方向</label>
+              <select id="trSide"><option value="BUY">買進 (試單/加碼)</option><option value="SELL">賣出 (停損/停利)</option></select>
+            </div>
+            <div class="field"><label>零股股數</label><input type="number" id="trShares" placeholder="例如 80"></div>
+            <div class="field"><label>成交價格</label><input type="number" id="trPrice" step="0.1" placeholder="例如 100"></div>
+            <div class="field"><label>設定停損價</label><input type="number" id="trStop" step="0.1" placeholder="例如 92"></div>
+          </div>
+          <div class="field" style="margin:10px 0;"><label>進出場理由與紀律備註</label><input id="trReason" placeholder="例如 符合C01/C08/C09+下半身，第1批試單"></div>
+          <button class="btn-primary" onclick="submitTrade()">儲存至雲端交易日誌</button>
+        </div>
+
+        <div class="card-light">
+          <div class="card-title-row">
+            <div class="card-title">📒 歷史交易日誌</div>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>日期</th><th>標的</th><th>方向</th><th>股數</th><th>價格</th><th>損益</th></tr></thead>
+              <tbody id="journalTableBody"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ==================== 分頁 4：100 檔觀察清單與歷史統計 ==================== -->
+    <section id="tab-stats" class="tab-pane">
+      <div class="card-light">
+        <div class="card-title-row" style="flex-wrap:wrap;">
+          <div class="card-title">📈 100 檔觀察清單每日累積統計</div>
+          <div style="display:flex; gap:8px; flex-wrap:wrap;">
+            <input id="statSearch" placeholder="搜尋代號/名稱..." oninput="renderStatsTable()" style="padding:6px 10px; border-radius:8px; border:1px solid #cbd5e1; font-size:12px;">
+            <button class="btn-sm" style="background:#fee2e2; color:#991b1b;" onclick="toggleMonthlyCullFilter()" id="cullBtn">🔍 月度汰弱建議</button>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>代號/名稱</th><th>分類</th><th>收盤</th><th>底線天數</th><th>買點次數</th><th>警戒次數</th><th>20日均量(張)</th><th>月度健檢</th>
+              </tr>
+            </thead>
+            <tbody id="statsTableBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- 手機底部導覽列 -->
+  <nav class="bottom-nav" id="mobileNav">
+    <button class="active" onclick="switchTab('tab-today', this)"><span>📊</span><span>今日建議</span></button>
+    <button onclick="switchTab('tab-check', this)"><span>✅</span><span>檢核試算</span></button>
+    <button onclick="switchTab('tab-journal', this)"><span>📒</span><span>持股日誌</span></button>
+    <button onclick="switchTab('tab-stats', this)"><span>📈</span><span>100檔統計</span></button>
+  </nav>
+
+  <!-- 設定與 PIN 碼登入彈窗 -->
+  <div id="setupModal" class="modal-backdrop hidden">
+    <div class="modal-card">
+      <h2 style="font-size:18px; font-weight:800; margin-bottom:6px;">🔐 連線設定與個人驗證</h2>
+      <p style="font-size:12px; color:#64748b; margin-bottom:14px;">輸入你的 GAS Web App 網址與 PIN 碼以讀取個人持股與每日盤後分析。</p>
+      <div class="field" style="margin-bottom:10px;">
+        <label>GAS Web App 網址</label>
+        <input id="cfgGasUrl" placeholder="https://script.google.com/macros/s/.../exec" />
+      </div>
+      <div class="field" style="margin-bottom:14px;">
+        <label>個人 PIN 碼 (預設 1340)</label>
+        <input id="cfgPin" type="password" placeholder="輸入 PIN 碼" />
+      </div>
+      <div style="display:flex; flex-direction:column; gap:8px;">
+        <button class="btn-primary" onclick="saveConnectionAndLoad()">連線並載入今日資料</button>
+        <button class="btn-primary" style="background:#475569;" onclick="enterDemoMode()">先用模擬範例資料預覽看板</button>
+        <button id="closeModalBtn" class="btn-sm hidden" style="background:transparent; color:#64748b;" onclick="document.getElementById('setupModal').classList.add('hidden')">取消</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // ==================== 全域狀態 ====================
+    let APP = {
+      gasUrl: localStorage.getItem('oddlot_gas_url') || '',
+      pin: localStorage.getItem('oddlot_pin') || '',
+      isDemo: false,
+      cullOnly: false,
+      config: { totalCapital: 100000, riskPct: 0.01, maxSinglePct: 0.24, minCashPct: 0.30, maxHoldings: 4, tradingMode: 'PAPER', lastScanTime: '' },
+      market: { date: '-', close: 0, changePct: 0, tone: '尚無資料', cashAdvice: '30% 以上' },
+      filters: [],
+      dailyLogs: [],
+      holdings: [],
+      journal: [],
+      stats: [],
+      watchlist: []
+    };
+
+    const CHECKLIST_ITEMS = [
+      '1. 大盤與波動定調：檢視加權指數與 5/20/60 日線位置，劇烈震盪時縮減倉位不搶反彈。',
+      '2. 固定清單濾網掃描：確認標的符合 C08(量>1000張) + C09(站上20/60MA) + C01(強於大盤)。',
+      '3. 進場位置與警訊排除：屬「均線糾結發散」或「回測20日線守穩+下半身」；排除連漲9根或爆量長上影線。',
+      '4. 虧損反推零股股數：設定停損價(約6%~8%)，確認單筆最大虧損不超過總資金 1%~1.5%。',
+      '5. 盤後限價單與紀錄：14:30 前送出限價零股委託單（第一批僅進 1/3 倉位），並於交易日誌紀錄。'
+    ];
+
+    // ==================== 初始化 ====================
+    window.addEventListener('DOMContentLoaded', () => {
+      renderChecklist();
+      runQuickCalc();
+      if (!APP.gasUrl || !APP.pin) {
+        openSetupModal(false);
+      } else {
+        fetchDashboardData();
+      }
+    });
+
+    function openSetupModal(allowClose = true) {
+      document.getElementById('cfgGasUrl').value = APP.gasUrl;
+      document.getElementById('cfgPin').value = APP.pin;
+      document.getElementById('closeModalBtn').classList.toggle('hidden', !allowClose);
+      document.getElementById('setupModal').classList.remove('hidden');
+    }
+
+    function saveConnectionAndLoad() {
+      const url = document.getElementById('cfgGasUrl').value.trim();
+      const pin = document.getElementById('cfgPin').value.trim();
+      if (!url || !pin) return alert('請輸入完整的 GAS 網址與 PIN 碼');
+      APP.gasUrl = url;
+      APP.pin = pin;
+      APP.isDemo = false;
+      localStorage.setItem('oddlot_gas_url', url);
+      localStorage.setItem('oddlot_pin', pin);
+      document.getElementById('setupModal').classList.add('hidden');
+      fetchDashboardData();
+    }
+
+    async function fetchDashboardData() {
+      try {
+        document.getElementById('lastSyncText').textContent = '資料同步中...';
+        const res = await fetch(`${APP.gasUrl}?pin=${encodeURIComponent(APP.pin)}`);
+        const data = await res.json();
+        if (!data.ok) {
+          alert('驗證失敗：' + (data.error || '請檢查 PIN 碼'));
+          openSetupModal(true);
+          return;
+        }
+        APP.config = data.config;
+        APP.market = data.market;
+        APP.filters = data.filters || [];
+        APP.dailyLogs = data.dailyLogs || [];
+        APP.holdings = data.holdings || [];
+        APP.journal = data.journal || [];
+        APP.stats = data.stats || [];
+        APP.watchlist = data.watchlist || [];
+        renderAll();
+      } catch (e) {
+        alert('連線 GAS 失敗，可先切換「模擬範例預覽」查看畫面。\n錯誤：' + e.message);
+        openSetupModal(true);
+      }
+    }
+
+    // ==================== 分頁切換 ====================
+    function switchTab(tabId, btn) {
+      document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
+      document.getElementById(tabId).classList.add('active');
+      document.querySelectorAll('#desktopNav button, #mobileNav button').forEach(b => b.classList.remove('active'));
+      // 同步高亮桌機與手機按鈕
+      const idx = ['tab-today', 'tab-check', 'tab-journal', 'tab-stats'].indexOf(tabId);
+      const dBtns = document.querySelectorAll('#desktopNav button');
+      const mBtns = document.querySelectorAll('#mobileNav button');
+      if (dBtns[idx]) dBtns[idx].classList.add('active');
+      if (mBtns[idx]) mBtns[idx].classList.add('active');
+    }
+
+    // ==================== 主渲染 ====================
+    function renderAll() {
+      const m = APP.market;
+      const cfg = APP.config;
+      document.getElementById('lastSyncText').textContent = APP.isDemo ? '範例預覽模式（尚未連線GAS）' : `最後更新：${cfg.lastScanTime || '尚未掃描'}`;
+
+      // 模式標籤
+      const isPaper = cfg.tradingMode === 'PAPER';
+      const mb = document.getElementById('modeBadge');
+      mb.textContent = isPaper ? '模擬練習倉' : '實戰模式';
+      mb.className = 'pill-btn ' + (isPaper ? 'pill-mode-paper' : 'pill-mode-real');
+      document.getElementById('holdingModeTag').textContent = isPaper ? '模擬練習' : '實戰倉';
+      document.getElementById('journalModeLabel').textContent = isPaper ? '模擬練習' : '實戰倉';
+
+      // Widget 1: 大盤
+      document.getElementById('mktDate').textContent = m.date || '-';
+      document.getElementById('mktClose').textContent = m.close ? Number(m.close).toLocaleString() : '-';
+      document.getElementById('mktTone').textContent = m.tone || '震盪整理';
+      const chg = Number(m.changePct || 0);
+      document.getElementById('mktChg').textContent = `${chg >= 0 ? '+' : ''}${chg}%`;
+      const wm = document.getElementById('wMarket');
+      wm.className = 'widget ' + (m.tone === '偏多格局' ? 'w-red' : (m.tone === '空頭警戒' ? 'w-green' : 'w-blue'));
+
+      // Widget 2 & 防呆計算
+      const openHoldings = APP.holdings.filter(h => h.Status === 'OPEN' && h.Mode === cfg.tradingMode);
+      const invested = openHoldings.reduce((acc, h) => acc + (Number(h.Shares) * Number(h.AvgCost)), 0);
+      const cashLeftPct = Math.max(0, Math.round(((cfg.totalCapital - invested) / cfg.totalCapital) * 100));
+      document.getElementById('cashAdvice').textContent = m.cashAdvice || '30% 以上';
+      document.getElementById('curCashPct').textContent = `目前現金 ${cashLeftPct}% (已持 ${openHoldings.length} 檔)`;
+
+      const banner = document.getElementById('guardrailBanner');
+      if (openHoldings.length >= cfg.maxHoldings || cashLeftPct < cfg.minCashPct * 100) {
+        banner.textContent = `⚠️ 資金水位防呆觸發：目前持有 ${openHoldings.length} 檔 / 現金剩餘 ${cashLeftPct}%，依鐵律建議今日不再開新倉！`;
+        banner.classList.remove('hidden');
+      } else {
+        banner.classList.add('hidden');
+      }
+
+      // Widget 4: 單筆風險
+      document.getElementById('riskPctLabel').textContent = (cfg.riskPct * 100).toFixed(1) + '%';
+      document.getElementById('riskAmtVal').textContent = '$' + Math.round(cfg.totalCapital * cfg.riskPct).toLocaleString();
+      document.getElementById('capLabel').textContent = '總資金 $' + Number(cfg.totalCapital).toLocaleString();
+
+      renderFilterSwitches();
+      renderTodayLists();
+      renderHoldingsAndJournal();
+      renderStatsTable();
+    }
+
+    // ==================== 獨立條件開關與即時過濾 ====================
+    function renderFilterSwitches() {
+      const box = document.getElementById('filterSwitches');
+      box.innerHTML = APP.filters.map(f => `
+        <div class="filter-row">
+          <div>
+            <div style="font-size:12px; font-weight:800;">${f.Name}</div>
+            <div style="font-size:11px; opacity:0.7;">${f.Description}</div>
+          </div>
+          <label class="switch">
+            <input type="checkbox" ${f.Enabled ? 'checked' : ''} onchange="toggleFilter('${f.FilterId}', this.checked)">
+            <span class="slider"></span>
+          </label>
+        </div>
+      `).join('');
+    }
+
+    function toggleFilter(id, val) {
+      const f = APP.filters.find(x => x.FilterId === id);
+      if (f) f.Enabled = val;
+      document.getElementById('activeFilterSummary').textContent = '已自訂條件';
+      renderTodayLists();
+    }
+
+    function resetDefaultFilters() {
+      const defaults = new Set(['C08', 'C09', 'C01', 'EXCL_9DAY', 'EXCL_UPPER_SHADOW', 'SHOW_ANTI']);
+      APP.filters.forEach(f => { f.Enabled = defaults.has(f.FilterId); });
+      document.getElementById('activeFilterSummary').textContent = '手冊標準';
+      renderFilterSwitches();
+      renderTodayLists();
+    }
+
+    async function saveFiltersToGas() {
+      if (APP.isDemo) return alert('範例預覽模式無法儲存至雲端，請先連線 GAS。');
+      const map = {};
+      APP.filters.forEach(f => { map[f.FilterId] = Boolean(f.Enabled); });
+      await fetch(APP.gasUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify({ pin: APP.pin, action: 'saveFilters', filters: map })
+      });
+      alert('已將篩選條件開關儲存至 Google 試算表！');
+    }
+
+    function evaluateWithCurrentSwitches(item) {
+      const hits = new Set(String(item.Hits || '').split(',').filter(Boolean));
+      const enabled = APP.filters.filter(f => f.Enabled).map(f => f.FilterId);
+
+      // 檢查排除項
+      if (enabled.includes('EXCL_9DAY') && hits.has('EXCL_9DAY')) return 'ANTI';
+      if (enabled.includes('EXCL_UPPER_SHADOW') && hits.has('EXCL_UPPER_SHADOW')) return 'ANTI';
+      if (hits.has('逆PPP') || hits.has('反下半身')) return 'ANTI';
+
+      // 檢查開啟的選股條件是否全部符合
+      const checkIds = enabled.filter(id => !id.startsWith('EXCL_') && id !== 'SHOW_ANTI');
+      const requiredMatch = checkIds.every(id => {
+        if (id === 'NAKED_K') return hits.has('下半身') || hits.has('鳥嘴') || hits.has('多頭吞噬') || hits.has('晨星') || hits.has('長下影線');
+        return hits.has(id);
+      });
+
+      if (requiredMatch && item.Action === '試單買進') return 'BUY';
+      if (requiredMatch && checkIds.length > 0) return 'BUY';
+      if (hits.has('C08') && hits.has('C09') && hits.has('C01')) return 'WATCH';
+      return 'NONE';
+    }
+
+    function renderTodayLists() {
+      const mode = document.getElementById('actionFilterSelect').value;
+      const showAnti = APP.filters.find(f => f.FilterId === 'SHOW_ANTI')?.Enabled !== false;
+
+      let buyCount = 0, antiCount = 0;
+      const mainItems = [];
+      const antiItems = [];
+
+      APP.dailyLogs.forEach(item => {
+        const status = evaluateWithCurrentSwitches(item);
+        if (status === 'BUY') buyCount++;
+        if (status === 'ANTI') { antiCount++; antiItems.push(item); }
+
+        if (mode === 'BUY' && status !== 'BUY') return;
+        if (mode === 'ACTIONABLE' && status !== 'BUY' && !(showAnti && status === 'ANTI')) return;
+        if (mode === 'WATCH' && status === 'NONE') return;
+        mainItems.push({ ...item, dynamicStatus: status });
+      });
+
+      document.getElementById('buyCountVal').textContent = `${buyCount} 檔`;
+      document.getElementById('antiCount').textContent = `警戒 ${antiCount}`;
+
+      const listEl = document.getElementById('todayRecommendList');
+      if (mainItems.length === 0) {
+        listEl.innerHTML = `<div style="padding:24px; text-align:center; opacity:0.75; font-size:13px;">今日無符合條件標的，依紀律執行「空手觀察」。</div>`;
+      } else {
+        listEl.innerHTML = mainItems.map(x => renderStockCard(x)).join('');
+      }
+
+      const antiEl = document.getElementById('antiList');
+      if (!showAnti || antiItems.length === 0) {
+        antiEl.innerHTML = `<div style="font-size:12px; color:#64748b;">今日無特別高檔或空頭反指標警戒標的。</div>`;
+      } else {
+        antiEl.innerHTML = antiItems.slice(0, 6).map(x => `
+          <div class="stock-item" onclick="this.classList.toggle('open')">
+            <div class="stock-top">
+              <div><span class="stock-name">${x.Name}</span><span class="stock-code">${x.Code}</span></div>
+              <div class="stock-price ${Number(x.ChangePct) >= 0 ? 'up' : 'down'}">${x.Close} (${x.ChangePct >= 0 ? '+' : ''}${x.ChangePct}%)</div>
+            </div>
+            <div style="font-size:11px; color:#15803d; margin-top:4px; font-weight:700;">⚠️ ${x.Reason}</div>
+          </div>
+        `).join('');
+      }
+    }
+
+    function renderStockCard(x) {
+      const chg = Number(x.ChangePct || 0);
+      const cls = chg >= 0 ? 'up' : 'down';
+      const badge = x.dynamicStatus === 'BUY'
+        ? `<span class="badge badge-buy">🎯 試單買進</span>`
+        : (x.dynamicStatus === 'ANTI' ? `<span class="badge badge-anti">⚠️ 反指標警戒</span>` : `<span class="badge badge-watch">👀 觀察追蹤</span>`);
+
+      const hitsArr = String(x.Hits || '').split(',').filter(Boolean);
+      return `
+        <div class="stock-item" onclick="this.classList.toggle('open')">
+          <div class="stock-top">
+            <div>
+              <span class="stock-name">${x.Name}</span>
+              <span class="stock-code">${x.Code}</span>
+              ${badge}
+            </div>
+            <div class="stock-price ${cls}">${x.Close} <span style="font-size:12px;">(${chg >= 0 ? '+' : ''}${chg}%)</span></div>
+          </div>
+          <div class="stock-sub">
+            <span>建議：<strong>${x.RecShares} 股</strong>｜限價 <strong>${x.LimitPrice}</strong>｜停損 <strong>${x.StopLoss}</strong></span>
+            <span style="opacity:0.75;">C02:${x.C02Status || '穩健'} | 法人:${x.InstDays || 0}日</span>
+          </div>
+          <div class="stock-detail">
+            <div class="tag-row">${hitsArr.map(h => `<span class="tag">${h}</span>`).join('')}</div>
+            <div><strong>💡 規則原因：</strong>${x.Reason}</div>
+            <div style="margin-top:4px; opacity:0.85;">PE: ${x.PE || '-'} ｜ 殖利率: ${x.Yield || '-'}% ｜ 成交量: ${x.VolumeLots} 張</div>
+            <div style="margin-top:8px; display:flex; gap:8px; flex-wrap:wrap;" onclick="event.stopPropagation()">
+              <button class="btn-sm" style="background:#dc2626; color:#fff;" onclick="prefillTrade('${x.Code}','${x.Name}',${x.RecShares},${x.LimitPrice},${x.StopLoss},'${x.Reason}')">✍️ 帶入記帳</button>
+              <a class="btn-sm" style="background:#334155; color:#fff; text-decoration:none;" target="_blank" href="https://tw.stock.yahoo.com/quote/${x.Code}.TW">Yahoo K線 ↗</a>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    // ==================== 持股與日誌 ====================
+    function renderHoldingsAndJournal() {
+      const mode = APP.config.tradingMode;
+      const openList = APP.holdings.filter(h => h.Status === 'OPEN' && h.Mode === mode);
+      const alertBox = document.getElementById('holdingAlertsList');
+      const openBox = document.getElementById('openHoldingsList');
+
+      document.getElementById('holdAlertCount').textContent = `持股 ${openList.length}`;
+
+      if (openList.length === 0) {
+        const emptyHtml = `<div style="font-size:12px; color:#64748b;">目前 (${mode === 'PAPER' ? '模擬練習倉' : '實戰倉'}) 尚無持股。</div>`;
+        alertBox.innerHTML = emptyHtml;
+        openBox.innerHTML = emptyHtml;
+      } else {
+        const html = openList.map(h => {
+          const log = APP.dailyLogs.find(d => String(d.Code) === String(h.Code));
+          const curPrice = log ? Number(log.Close) : Number(h.AvgCost);
+          const pnlPct = (((curPrice - Number(h.AvgCost)) / Number(h.AvgCost)) * 100).toFixed(2);
+          return `
+            <div class="stock-item">
+              <div class="stock-top">
+                <div><span class="stock-name">${h.Name}</span><span class="stock-code">${h.Code} (第${h.Stage}批)</span></div>
+                <div class="stock-price ${pnlPct >= 0 ? 'up' : 'down'}">${pnlPct >= 0 ? '+' : ''}${pnlPct}%</div>
+              </div>
+              <div class="stock-sub">
+                <span>${h.Shares}股｜均價 ${h.AvgCost}｜停損 ${h.StopLoss}</span>
+                <span>持有 ${h.DaysHeld} 天</span>
+              </div>
+            </div>
+          `;
+        }).join('');
+        alertBox.innerHTML = html;
+        openBox.innerHTML = html;
+      }
+
+      const jBody = document.getElementById('journalTableBody');
+      const filteredJ = APP.journal.filter(j => j.Mode === mode);
+      jBody.innerHTML = filteredJ.length === 0
+        ? `<tr><td colspan="6" style="text-align:center; color:#64748b;">尚無交易紀錄</td></tr>`
+        : filteredJ.map(j => `
+          <tr>
+            <td>${j.Date}</td>
+            <td><strong>${j.Name}</strong> ${j.Code}</td>
+            <td><span class="${j.Side === 'BUY' ? 'up' : 'down'}" style="font-weight:800;">${j.Side === 'BUY' ? '買進' : '賣出'}</span></td>
+            <td>${j.Shares}</td>
+            <td>${j.Price}</td>
+            <td class="${Number(j.PnL) >= 0 ? 'up' : 'down'}">${j.PnL || '-'}</td>
+          </tr>
+        `).join('');
+    }
+
+    function prefillTrade(code, name, shares, price, stop, reason) {
+      document.getElementById('trCode').value = code;
+      document.getElementById('trName').value = name;
+      document.getElementById('trShares').value = shares;
+      document.getElementById('trPrice').value = price;
+      document.getElementById('trStop').value = stop;
+      document.getElementById('trReason').value = reason;
+      switchTab('tab-journal');
+    }
+
+    async function submitTrade() {
+      const trade = {
+        mode: APP.config.tradingMode,
+        code: document.getElementById('trCode').value.trim(),
+        name: document.getElementById('trName').value.trim(),
+        side: document.getElementById('trSide').value,
+        shares: Number(document.getElementById('trShares').value),
+        price: Number(document.getElementById('trPrice').value),
+        stopLoss: Number(document.getElementById('trStop').value),
+        reason: document.getElementById('trReason').value.trim()
+      };
+      if (!trade.code || !trade.shares || !trade.price) return alert('請填寫代號、股數與價格');
+      if (APP.isDemo) return alert('範例預覽模式無法寫入雲端，請先連線 GAS。');
+
+      await fetch(APP.gasUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify({ pin: APP.pin, action: 'addTrade', trade })
+      });
+      alert('已記錄至雲端交易日誌！');
+      fetchDashboardData();
+    }
+
+    async function toggleTradingMode() {
+      const next = APP.config.tradingMode === 'PAPER' ? 'REAL' : 'PAPER';
+      APP.config.tradingMode = next;
+      renderAll();
+      if (!APP.isDemo && APP.gasUrl) {
+        await fetch(APP.gasUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+          body: JSON.stringify({ pin: APP.pin, action: 'updateConfig', tradingMode: next })
+        });
+      }
+    }
+
+    // ==================== 15 分鐘檢核 & 計算機 ====================
+    function renderChecklist() {
+      const saved = JSON.parse(localStorage.getItem('oddlot_chk_' + new Date().toISOString().slice(0,10)) || '{}');
+      document.getElementById('checklistBox').innerHTML = CHECKLIST_ITEMS.map((txt, i) => `
+        <label style="display:flex; gap:10px; align-items:flex-start; background:#f8fafc; padding:10px 12px; border-radius:12px; cursor:pointer;">
+          <input type="checkbox" ${saved[i] ? 'checked' : ''} onchange="saveCheck(${i}, this.checked)" style="margin-top:3px; width:18px; height:18px;">
+          <span>${txt}</span>
+        </label>
+      `).join('');
+    }
+    function saveCheck(i, val) {
+      const key = 'oddlot_chk_' + new Date().toISOString().slice(0,10);
+      const saved = JSON.parse(localStorage.getItem(key) || '{}');
+      saved[i] = val;
+      localStorage.setItem(key, JSON.stringify(saved));
+    }
+    function resetChecklist() {
+      localStorage.removeItem('oddlot_chk_' + new Date().toISOString().slice(0,10));
+      renderChecklist();
+    }
+
+    function runQuickCalc() {
+      const cap = Number(document.getElementById('calcCap').value) || 0;
+      const riskPct = (Number(document.getElementById('calcRisk').value) || 1) / 100;
+      const entry = Number(document.getElementById('calcEntry').value) || 1;
+      const stop = Number(document.getElementById('calcStop').value) || 0;
+      const maxLoss = Math.round(cap * riskPct);
+      const diff = Math.max(0.1, entry - stop);
+      const sharesByRisk = Math.floor(maxLoss / diff);
+      const stage1Cap = Math.round(cap * 0.24 / 3);
+      const sharesByCap = Math.floor(stage1Cap / entry);
+      const finalShares = Math.max(0, Math.min(sharesByRisk, sharesByCap));
+      const cost = Math.round(finalShares * entry);
+      const stopDist = (((entry - stop) / entry) * 100).toFixed(1);
+
+      document.getElementById('calcResultBox').innerHTML = `
+        <div>單筆最大容忍虧損：<strong>$${maxLoss.toLocaleString()}</strong></div>
+        <div>停損空間距離：<strong>${stopDist}%</strong> (手冊建議 6%~8%)</div>
+        <div>建議第一批試單股數：<strong style="color:#dc2626; font-size:18px;">${finalShares} 股</strong></div>
+        <div>投入金額：<strong>$${cost.toLocaleString()}</strong> (佔總資金 ${((cost/Math.max(1,cap))*100).toFixed(1)}%)</div>
+      `;
+    }
+
+    // ==================== 100 檔統計表 ====================
+    function toggleMonthlyCullFilter() {
+      APP.cullOnly = !APP.cullOnly;
+      document.getElementById('cullBtn').style.background = APP.cullOnly ? '#dc2626' : '#fee2e2';
+      document.getElementById('cullBtn').style.color = APP.cullOnly ? '#fff' : '#991b1b';
+      renderStatsTable();
+    }
+
+    function renderStatsTable() {
+      const q = (document.getElementById('statSearch').value || '').trim().toLowerCase();
+      const rows = APP.stats.filter(s => {
+        if (APP.cullOnly && !String(s.MonthlyReview || '').includes('汰除')) return false;
+        if (q && !String(s.Code).toLowerCase().includes(q) && !String(s.Name).toLowerCase().includes(q)) return false;
+        return true;
+      });
+      document.getElementById('statsTableBody').innerHTML = rows.length === 0
+        ? `<tr><td colspan="8" style="text-align:center; color:#64748b;">尚無統計資料</td></tr>`
+        : rows.map(s => `
+          <tr>
+            <td><strong>${s.Name}</strong> <span style="color:#64748b;">${s.Code}</span></td>
+            <td>${s.Category}</td>
+            <td>${s.LastClose || '-'}</td>
+            <td>${s.BasePassDays}</td>
+            <td class="up" style="font-weight:800;">${s.BuySignalDays}</td>
+            <td class="down" style="font-weight:800;">${s.AlertDays}</td>
+            <td>${Number(s.AvgVol20Lots || 0).toLocaleString()}</td>
+            <td><span class="badge ${String(s.MonthlyReview).includes('汰除') ? 'badge-light-anti' : 'badge-light-warn'}">${s.MonthlyReview}</span></td>
+          </tr>
+        `).join('');
+    }
+
+    // ==================== 範例預覽資料 (Demo Mode) ====================
+    function enterDemoMode() {
+      APP.isDemo = true;
+      document.getElementById('setupModal').classList.add('hidden');
+      APP.market = { date: '範例今日', close: 22850, changePct: 0.85, tone: '偏多格局', cashAdvice: '30% 以上' };
+      APP.filters = [
+        { FilterId: 'C08', Name: 'C08 成交量門檻 (>1,000張)', Enabled: true, Description: '當日整張成交量 > 1,000 張' },
+        { FilterId: 'C09', Name: 'C09 中長期均線多頭', Enabled: true, Description: '站上20及60日線且上彎' },
+        { FilterId: 'C01', Name: 'C01 強於大盤 (RS)', Enabled: true, Description: '相對大盤抗跌或較強' },
+        { FilterId: 'C04', Name: 'C04 均線糾結發散', Enabled: false, Description: '5/10/20/60糾結後發散' },
+        { FilterId: 'C05', Name: 'C05 KD 中低檔金叉', Enabled: false, Description: 'K,D<=60 黃金交叉' },
+        { FilterId: 'NAKED_K', Name: '裸K雙重共振 (下半身/鳥嘴)', Enabled: false, Description: '出現下半身或鳥嘴轉折' },
+        { FilterId: 'EXCL_9DAY', Name: '排除九日法則過熱', Enabled: true, Description: '排除連漲>=8根標的' },
+        { FilterId: 'SHOW_ANTI', Name: '顯示反指標對照組', Enabled: true, Description: '標記空頭/過熱避雷股' }
+      ];
+      APP.dailyLogs = [
+        { Code: '2330', Name: '台積電', Close: 1035, ChangePct: 1.97, VolumeLots: 38200, Hits: 'C08,C09,C01,C04,下半身,C07', Action: '試單買進', Reason: '符合必備底線；觸發C04均線糾結發散；出現「下半身」轉強', RecShares: 7, LimitPrice: 1040, StopLoss: 965, PE: '23.5', Yield: '1.4', InstDays: 6, C02Status: '穩健' },
+        { Code: '0050', Name: '元大台灣50', Close: 194.5, ChangePct: 1.04, VolumeLots: 14500, Hits: 'C08,C09,C01,鳥嘴', Action: '試單買進', Reason: '符合必備底線；出現「鳥嘴」回測20日線再上揚', RecShares: 41, LimitPrice: 195.0, StopLoss: 182.0, PE: '-', Yield: '2.8', InstDays: 4, C02Status: '穩健' },
+        { Code: '1519', Name: '華城', Close: 685, ChangePct: 4.10, VolumeLots: 9800, Hits: 'C08,C09,C01,EXCL_9DAY', Action: '反指標警戒', Reason: '連漲第8根K線(九日法則)，高檔過熱不追', RecShares: 0, LimitPrice: 686, StopLoss: 635, PE: '42.1', Yield: '0.9', InstDays: 2, C02Status: '穩健' },
+        { Code: '3481', Name: '群創', Close: 13.8, ChangePct: -1.78, VolumeLots: 42000, Hits: 'C08,逆PPP,反下半身', Action: '反指標警戒', Reason: '均線呈空頭排列(逆PPP)且破月線，避開接刀', RecShares: 0, LimitPrice: 13.8, StopLoss: 12.8, PE: '-', Yield: '0', InstDays: -3, C02Status: '觀察' }
+      ];
+      APP.holdings = [
+        { Id: 'T1', Mode: 'PAPER', Code: '2317', Name: '鴻海', Stage: 1, Shares: 40, AvgCost: 205, StopLoss: 190, DaysHeld: 3, Status: 'OPEN' }
+      ];
+      APP.journal = [
+        { Date: '2026-11-22', Mode: 'PAPER', Code: '2317', Name: '鴻海', Side: 'BUY', Shares: 40, Price: 205, PnL: 0 }
+      ];
+      APP.stats = [
+        { Code: '2330', Name: '台積電', Category: '半導體', LastClose: 1035, BasePassDays: 14, BuySignalDays: 4, AlertDays: 0, AvgVol20Lots: 35100, MonthlyReview: '核心強勢' },
+        { Code: '1519', Name: '華城', Category: '重電能源', LastClose: 685, BasePassDays: 11, BuySignalDays: 2, AlertDays: 3, AvgVol20Lots: 8400, MonthlyReview: '觀察中' },
+        { Code: '3481', Name: '群創', Category: '面板', LastClose: 13.8, BasePassDays: 0, BuySignalDays: 0, AlertDays: 8, AvgVol20Lots: 51000, MonthlyReview: '建議汰除(長期破底)' }
+      ];
+      renderAll();
+    }
+  </script>
+</body>
+</html>
