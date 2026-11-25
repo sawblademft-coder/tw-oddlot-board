@@ -214,19 +214,24 @@ function runDailyAfterHoursScan() {
   const histRows = histSheet.getDataRange().getValues().slice(1);
   const instMap = getInstitutionalMap(ss);
 
-  // 建立依代號分組的歷史陣列
+  // 建立依代號分組的歷史陣列（用 Map 依日期去重並排序）
   const histByCode = {};
   histRows.forEach(r => {
     const c = String(r[1]).trim();
-    if (!histByCode[c]) histByCode[c] = [];
-    histByCode[c].push({
-      date: String(r[0]),
+    const dStr = formatDateVal(r[0]);
+    if (!c || !dStr) return;
+    if (!histByCode[c]) histByCode[c] = {};
+    histByCode[c][dStr] = {
+      date: dStr,
       open: Number(r[2]),
       high: Number(r[3]),
       low: Number(r[4]),
       close: Number(r[5]),
       volume: Number(r[6])
-    });
+    };
+  });
+  Object.keys(histByCode).forEach(c => {
+    histByCode[c] = Object.values(histByCode[c]).sort((a, b) => a.date.localeCompare(b.date));
   });
 
   const appendHistRows = [];
@@ -308,6 +313,9 @@ function runDailyAfterHoursScan() {
   }
   if (dailyLogRows.length > 0) {
     const logSheet = ss.getSheetByName(SHEET_NAMES.DAILY_LOG);
+    if (String(logSheet.getRange(1, 17).getValue()) !== 'TechJson') {
+      logSheet.getRange(1, 17).setValue('TechJson');
+    }
     // 清除同一天舊的掃描紀錄（若有手動重跑）
     removeRowsByDate(logSheet, todayStr);
     logSheet.getRange(logSheet.getLastRow() + 1, 1, dailyLogRows.length, 17).setValues(dailyLogRows);
@@ -1118,20 +1126,22 @@ function formatDateVal(val) {
 }
 function getStockChartBars(ss, code, limit) {
   const rows = ss.getSheetByName(SHEET_NAMES.HISTORY).getDataRange().getValues().slice(1);
-  const list = [];
+  const byTime = {};
   rows.forEach(r => {
     if (String(r[1]).trim() === code) {
-      list.push({
-        time: formatDateVal(r[0]),
+      const t = formatDateVal(r[0]);
+      if (!t || isNaN(Number(r[5]))) return;
+      byTime[t] = {
+        time: t,
         open: Number(r[2]),
         high: Number(r[3]),
         low: Number(r[4]),
         close: Number(r[5]),
         volume: Number(r[6])
-      });
+      };
     }
   });
-  list.sort((a, b) => a.time.localeCompare(b.time));
+  const list = Object.values(byTime).sort((a, b) => a.time.localeCompare(b.time));
   // 計算 5/20/60 日線後截取最後 limit 筆
   const withMa = list.map((b, idx) => ({
     ...b,

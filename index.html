@@ -719,7 +719,7 @@
 
         <div class="stop-bar">
           <div style="font-size:12px; line-height:1.6;">
-            <div><strong>🛡️ 行動建議：</strong>試單 <strong style="color:#f87171;">${x.RecShares} 股</strong> ｜ 盤後限價 <strong>${x.LimitPrice}</strong> ｜ 停損防線 <strong style="color:#4ade80;">${x.StopLoss} 元</strong></div>
+            <div><strong>🛡️ 行動建議：</strong>${dynamicStatus === 'ANTI' ? '<span style="color:#4ade80; font-weight:800;">⛔ 不建議買進（空手避雷）</span>' : `試單 <strong style="color:#f87171;">${x.RecShares} 股</strong> ｜ 盤後限價 <strong>${x.LimitPrice}</strong>`} ｜ 停損防線 <strong style="color:#4ade80;">${x.StopLoss} 元</strong></div>
             <div style="color:#cbd5e1;"><strong>💡 規則原因：</strong>${x.Reason}</div>
           </div>
           <button class="btn-sm" style="background:#dc2626; color:#fff;" onclick="prefillTrade('${x.Code}','${x.Name}',${x.RecShares},${x.LimitPrice},${x.StopLoss},'${x.Reason}')">✍️ 帶入記帳</button>
@@ -766,28 +766,45 @@
 
       const container = document.getElementById('klineContainer');
       if (!container || !window.LightweightCharts || bars.length === 0) return;
+
+      // 前端雙重去重與排序，確保時間嚴格遞增不重複 (LightweightCharts 必要條件)
+      const dedupMap = new Map();
+      bars.forEach(b => {
+        const t = fmtDate(b.time);
+        if (t && !isNaN(b.open) && !isNaN(b.high) && !isNaN(b.low) && !isNaN(b.close)) {
+          dedupMap.set(t, { ...b, time: t });
+        }
+      });
+      const cleanBars = Array.from(dedupMap.values()).sort((a, b) => a.time.localeCompare(b.time));
+      if (cleanBars.length === 0) return;
+      statusEl.textContent = `近 ${cleanBars.length} 個交易日`;
+
       container.innerHTML = '';
+      const chartWidth = container.clientWidth || container.parentElement.clientWidth || 580;
       const chart = LightweightCharts.createChart(container, {
         layout: { background: { color: '#0f1219' }, textColor: '#cbd5e1' },
         grid: { vertLines: { color: 'rgba(148,163,184,0.1)' }, horzLines: { color: 'rgba(148,163,184,0.1)' } },
-        width: container.clientWidth,
+        width: chartWidth,
         height: 290,
-        timeScale: { borderColor: 'rgba(148,163,184,0.2)' }
+        timeScale: { borderColor: 'rgba(148,163,184,0.2)', timeVisible: true }
       });
 
       const candleSeries = chart.addCandlestickSeries({
         upColor: '#ef4444', downColor: '#22c55e', borderVisible: false,
         wickUpColor: '#ef4444', wickDownColor: '#22c55e'
       });
-      candleSeries.setData(bars.map(b => ({ time: b.time, open: b.open, high: b.high, low: b.low, close: b.close })));
+      candleSeries.setData(cleanBars.map(b => ({ time: b.time, open: Number(b.open), high: Number(b.high), low: Number(b.low), close: Number(b.close) })));
 
       const addMaLine = (key, color) => {
-        const line = chart.addLineSeries({ color, lineWidth: 1.5, priceLineVisible: false });
-        line.setData(bars.filter(b => b[key] != null).map(b => ({ time: b.time, value: b[key] })));
+        const pts = cleanBars.filter(b => b[key] != null && !isNaN(b[key])).map(b => ({ time: b.time, value: Number(b[key]) }));
+        if (pts.length > 0) {
+          const line = chart.addLineSeries({ color, lineWidth: 1.5, priceLineVisible: false });
+          line.setData(pts);
+        }
       };
-      addMaLine('sma5', '#ef4444');   // 相場師朗 5日紅線
-      addMaLine('sma20', '#22c55e');  // 20日綠線
-      addMaLine('sma60', '#3b82f6');  // 60日藍線
+      addMaLine('sma5', '#ef4444');
+      addMaLine('sma20', '#22c55e');
+      addMaLine('sma60', '#3b82f6');
       chart.timeScale().fitContent();
     }
 
