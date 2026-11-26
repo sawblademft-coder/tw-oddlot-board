@@ -1432,7 +1432,10 @@ function calcBotTax(code, amount) {
 
 function runAutoBotTrading(ss, todayStr, marketStatus, dailyLogRows, histByCode, cfg) {
   const BOT_INIT_CAP = 100000;
-  const eqSheet = getOrCreateSheet(ss, SHEET_NAMES.AUTO_EQUITY, ['Date', 'Cash', 'MarketValue', 'TotalEquity', 'BotReturnPct', 'TwiiClose', 'TwiiReturnPct', 'ActionsSummary']);
+  const eqSheet = getOrCreateSheet(ss, SHEET_NAMES.AUTO_EQUITY, ['Date', 'Cash', 'MarketValue', 'TotalEquity', 'BotReturnPct', 'TwiiClose', 'TwiiReturnPct', 'ActionsSummary', 'MktTone', 'HoldingsSnapshot']);
+  if (String(eqSheet.getRange(1, 9).getValue()) !== 'MktTone') {
+    eqSheet.getRange(1, 9, 1, 2).setValues([['MktTone', 'HoldingsSnapshot']]);
+  }
   const trSheet = getOrCreateSheet(ss, SHEET_NAMES.AUTO_TRADES, ['Id', 'Date', 'Code', 'Name', 'Side', 'Stage', 'Shares', 'Price', 'Amount', 'Fee', 'Tax', 'NetPnL', 'Reason']);
   const hSheet = ss.getSheetByName(SHEET_NAMES.HOLDINGS);
 
@@ -1593,15 +1596,22 @@ function runAutoBotTrading(ss, todayStr, marketStatus, dailyLogRows, histByCode,
     }
   }
 
-  // --- 步驟 C：結算當日淨值並寫入 Auto_Equity_Curve ---
+  // --- 步驟 C：結算當日淨值並寫入 Auto_Equity_Curve (含當日持股快照) ---
   setConfigValue(ss, 'AUTO_BOT_CASH', Math.round(cash));
   const finalOpen = hSheet.getDataRange().getValues().slice(1).filter(r => String(r[1]) === 'AUTO_BOT' && String(r[11]).toUpperCase() === 'OPEN');
   let marketValue = 0;
-  finalOpen.forEach(r => {
+  const holdingsSnapshot = finalOpen.map(r => {
     const code = normCode(r[2]);
+    const name = String(r[3]);
+    const stage = Number(r[4]);
     const shares = Number(r[5]);
-    const curClose = logMap[code] ? logMap[code].close : Number(r[6]);
+    const avgCost = Number(r[6]);
+    const stopLoss = Number(r[7]);
+    const daysHeld = Number(r[10] || 0);
+    const curClose = logMap[code] ? logMap[code].close : avgCost;
     marketValue += Math.round(shares * curClose);
+    const pnlPct = Number((((curClose - avgCost) / Math.max(1, avgCost)) * 100).toFixed(2));
+    return { code, name, stage, shares, avgCost, curPrice: curClose, stopLoss, daysHeld, pnlPct };
   });
 
   const totalEquity = Math.round(cash + marketValue);
@@ -1611,7 +1621,7 @@ function runAutoBotTrading(ss, todayStr, marketStatus, dailyLogRows, histByCode,
   const summaryText = actionsTaken.length > 0 ? actionsTaken.join('、') : '今日無交易 (持有觀察)';
 
   removeRowsByDate(eqSheet, todayStr);
-  eqSheet.appendRow([todayStr, Math.round(cash), marketValue, totalEquity, botReturnPct, twiiClose, twiiReturnPct, summaryText]);
+  eqSheet.appendRow([todayStr, Math.round(cash), marketValue, totalEquity, botReturnPct, twiiClose, twiiReturnPct, summaryText, marketStatus.tone || '震盪整理', JSON.stringify(holdingsSnapshot)]);
 
   return { equity: totalEquity, returnPct: botReturnPct, twiiReturnPct, summaryText };
 }
@@ -1639,7 +1649,7 @@ function getAutoBotDashboardData(ss) {
   return {
     startDate: String(cfg.AUTO_BOT_START_DATE || ''),
     cash: cfg.AUTO_BOT_CASH !== undefined && cfg.AUTO_BOT_CASH !== '' ? Number(cfg.AUTO_BOT_CASH) : 100000,
-    equityCurve: eqSheet ? getSheetObjects(ss, SHEET_NAMES.AUTO_EQUITY) : [],
+    equityCurve: eqSheet ? getSheetObjects(ss, SHEET_NAMES.AUTO_EQUITY).slice(-65) : [],
     trades: trSheet ? getSheetObjects(ss, SHEET_NAMES.AUTO_TRADES).slice(-100).reverse() : []
   };
 }

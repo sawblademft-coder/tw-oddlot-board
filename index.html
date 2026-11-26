@@ -546,8 +546,24 @@
         </div>
       </div>
     </section>
-    <!-- ==================== 分頁 6：全自動模擬操盤 (三個月成效評估) ==================== -->
+    <!-- ==================== 分頁 6：全自動模擬操盤 (三個月滾動實測) ==================== -->
     <section id="tab-autobot" class="tab-pane">
+      <!-- 每日滾動時間點切換器 -->
+      <div id="botTimelineCard" class="card-dark hidden" style="margin-bottom:14px;">
+        <div class="card-title-row" style="flex-wrap:wrap; margin-bottom:10px;">
+          <div class="card-title">📅 每日滾動時間點回放（直接檢視過去三個月每天變化）</div>
+          <div style="display:flex; align-items:center; gap:6px;">
+            <button class="btn-sm" style="background:#334155; color:#fff;" onclick="stepBotDay(-1)">◀ 前一天</button>
+            <select id="botDateSelect" onchange="onBotDateSelect(this.value)" style="background:#0f172a; color:#fff; border:1px solid #475569; border-radius:8px; padding:4px 8px; font-size:12px; font-weight:700;"></select>
+            <button class="btn-sm" style="background:#334155; color:#fff;" onclick="stepBotDay(1)">後一天 ▶</button>
+          </div>
+        </div>
+        <div style="display:flex; align-items:center; gap:12px;">
+          <input type="range" id="botDaySlider" min="0" max="0" value="0" oninput="renderAutoBotAtIndex(Number(this.value))" style="flex:1; accent-color:#3b82f6; cursor:pointer;">
+          <span id="botSliderLabel" style="font-size:12px; font-weight:800; color:#93c5fd; white-space:nowrap;">第 1 / 1 日</span>
+        </div>
+      </div>
+
       <div class="widget-grid">
         <div class="widget w-blue">
           <div class="w-head"><span>🤖 機器人總淨值</span><span id="botStartDate">-</span></div>
@@ -583,8 +599,8 @@
       <div class="panel-grid two-col">
         <div class="card-light">
           <div class="card-title-row">
-            <div class="card-title">🤖 機器人目前持股 (獨立 $100,000 資金池)</div>
-            <span class="badge badge-light-warn">固定手冊規則</span>
+            <div class="card-title">🤖 機器人當日持股快照 (<span id="botSnapDate">最新</span>)</div>
+            <span class="badge badge-light-warn" id="botSnapTone">固定手冊規則</span>
           </div>
           <div id="botOpenHoldings"></div>
         </div>
@@ -908,19 +924,79 @@
       renderAutoBot();
     }
 
+    let BOT_CURVE = [];
+
     function renderAutoBot() {
       const bot = APP.autoBot || { startDate: '', cash: 100000, equityCurve: [], trades: [] };
-      const curve = bot.equityCurve || [];
-      const trades = bot.trades || [];
-      const latest = curve.length > 0 ? curve[curve.length - 1] : null;
+      const rawCurve = bot.equityCurve || [];
+      const dedup = new Map();
+      rawCurve.forEach(c => {
+        const t = fmtDate(c.Date);
+        if (t) dedup.set(t, { ...c, _date: t });
+      });
+      BOT_CURVE = Array.from(dedup.values()).sort((a, b) => a._date.localeCompare(b._date));
 
-      const equity = latest ? Number(latest.TotalEquity) : 100000;
-      const botRet = latest ? Number(latest.BotReturnPct) : 0;
-      const twiiRet = latest ? Number(latest.TwiiReturnPct) : 0;
+      const tlCard = document.getElementById('botTimelineCard');
+      if (BOT_CURVE.length === 0) {
+        tlCard.classList.add('hidden');
+        document.getElementById('botStartDate').textContent = '待首次掃描起跑';
+        document.getElementById('botEquityVal').textContent = '$100,000';
+        document.getElementById('botReturnVal').textContent = '+0.00%';
+        document.getElementById('botCashVal').textContent = '現金 $100,000';
+        document.getElementById('botAlphaVal').textContent = '+0.00%';
+        document.getElementById('botTwiiRet').textContent = '大盤 +0.00%';
+        document.getElementById('botWinRateVal').textContent = '- %';
+        document.getElementById('botPfVal').textContent = '賺賠比 -';
+        document.getElementById('botTradeCnt').textContent = '0 筆平倉';
+        document.getElementById('botMddVal').textContent = '0.00%';
+        document.getElementById('botDaysProgress').textContent = '已跑 0 / 65 交易日';
+        document.getElementById('botOpenHoldings').innerHTML = `<div style="font-size:12px; color:#64748b;">尚無紀錄，請點右上角「🔄 立即掃描」或等待 13:38 自動執行。</div>`;
+        document.getElementById('botTradesBody').innerHTML = `<tr><td colspan="8" style="text-align:center; color:#64748b;">尚無自動交易紀錄</td></tr>`;
+        if (document.getElementById('tab-autobot').classList.contains('active')) renderAutoBotChart(BOT_CURVE);
+        return;
+      }
+
+      tlCard.classList.remove('hidden');
+      const slider = document.getElementById('botDaySlider');
+      const sel = document.getElementById('botDateSelect');
+      slider.min = 0;
+      slider.max = BOT_CURVE.length - 1;
+      slider.value = BOT_CURVE.length - 1;
+      sel.innerHTML = BOT_CURVE.map((c, i) => `<option value="${i}">${c._date}</option>`).join('');
+      sel.value = String(BOT_CURVE.length - 1);
+
+      renderAutoBotAtIndex(BOT_CURVE.length - 1);
+    }
+
+    function stepBotDay(delta) {
+      if (!BOT_CURVE.length) return;
+      const cur = Number(document.getElementById('botDaySlider').value);
+      const next = Math.max(0, Math.min(BOT_CURVE.length - 1, cur + delta));
+      renderAutoBotAtIndex(next);
+    }
+
+    function onBotDateSelect(idxStr) {
+      renderAutoBotAtIndex(Number(idxStr));
+    }
+
+    function renderAutoBotAtIndex(idx) {
+      if (!BOT_CURVE[idx]) return;
+      const bot = APP.autoBot || { startDate: '', trades: [] };
+      const pt = BOT_CURVE[idx];
+      const subCurve = BOT_CURVE.slice(0, idx + 1);
+      const cutoffDate = pt._date;
+
+      document.getElementById('botDaySlider').value = idx;
+      document.getElementById('botDateSelect').value = String(idx);
+      document.getElementById('botSliderLabel').textContent = `第 ${idx + 1} / ${BOT_CURVE.length} 日`;
+
+      const equity = Number(pt.TotalEquity || 100000);
+      const botRet = Number(pt.BotReturnPct || 0);
+      const twiiRet = Number(pt.TwiiReturnPct || 0);
       const alpha = Number((botRet - twiiRet).toFixed(2));
-      const cash = latest ? Number(latest.Cash) : Number(bot.cash || 100000);
+      const cash = Number(pt.Cash || 100000);
 
-      document.getElementById('botStartDate').textContent = bot.startDate ? `起跑 ${fmtDate(bot.startDate)}` : '待首次掃描起跑';
+      document.getElementById('botStartDate').textContent = bot.startDate ? `起跑 ${fmtDate(bot.startDate)}` : cutoffDate;
       document.getElementById('botEquityVal').textContent = '$' + equity.toLocaleString();
       document.getElementById('botReturnVal').textContent = `${botRet >= 0 ? '+' : ''}${botRet.toFixed(2)}%`;
       document.getElementById('botCashVal').textContent = '現金 $' + cash.toLocaleString();
@@ -929,8 +1005,8 @@
       document.getElementById('botTwiiRet').textContent = `大盤 ${twiiRet >= 0 ? '+' : ''}${twiiRet.toFixed(2)}%`;
       document.getElementById('botAlphaWidget').className = 'widget ' + (alpha >= 0 ? 'w-red' : 'w-green');
 
-      // 勝率與賺賠比 (已平倉 SELL 紀錄)
-      const closedTrades = trades.filter(t => t.Side === 'SELL');
+      const subTrades = (bot.trades || []).filter(t => fmtDate(t.Date) <= cutoffDate);
+      const closedTrades = subTrades.filter(t => t.Side === 'SELL');
       const wins = closedTrades.filter(t => Number(t.NetPnL) > 0);
       const losses = closedTrades.filter(t => Number(t.NetPnL) < 0);
       const winRate = closedTrades.length > 0 ? ((wins.length / closedTrades.length) * 100).toFixed(1) : '-';
@@ -942,40 +1018,48 @@
       document.getElementById('botPfVal').textContent = `賺賠比 ${pf}`;
       document.getElementById('botTradeCnt').textContent = `${closedTrades.length} 筆平倉`;
 
-      // 最大回撤 MDD
       let peak = 100000, maxDd = 0;
-      curve.forEach(c => {
+      subCurve.forEach(c => {
         const eq = Number(c.TotalEquity || 100000);
         if (eq > peak) peak = eq;
         const dd = ((eq - peak) / peak) * 100;
         if (dd < maxDd) maxDd = dd;
       });
       document.getElementById('botMddVal').textContent = `${maxDd.toFixed(2)}%`;
-      document.getElementById('botDaysProgress').textContent = `已跑 ${curve.length} / 90 日`;
+      document.getElementById('botDaysProgress').textContent = `已跑 ${idx + 1} / 65 交易日`;
 
-      // 目前機器人持股
-      const openBot = APP.holdings.filter(h => h.Mode === 'AUTO_BOT' && h.Status === 'OPEN');
-      document.getElementById('botOpenHoldings').innerHTML = openBot.length === 0
-        ? `<div style="font-size:12px; color:#64748b;">目前機器人空手觀察中（尚無符合共振標的或已出場）。</div>`
-        : openBot.map(h => {
-            const log = APP.dailyLogs.find(d => String(d.Code) === String(h.Code));
-            const cur = log ? Number(log.Close) : Number(h.AvgCost);
-            const pct = (((cur - Number(h.AvgCost)) / Number(h.AvgCost)) * 100).toFixed(2);
-            return `
-              <div style="padding:10px; border-radius:12px; background:#f8fafc; border:1px solid #e2e8f0; margin-bottom:8px;">
-                <div style="display:flex; justify-content:space-between; font-weight:800;">
-                  <span>${h.Name} ${h.Code} (第${h.Stage}批)</span>
-                  <span class="${pct >= 0 ? 'up' : 'down'}">${pct >= 0 ? '+' : ''}${pct}%</span>
-                </div>
-                <div style="font-size:12px; color:#475569; margin-top:4px;">${h.Shares}股｜均價 ${h.AvgCost}｜現價 ${cur}｜停損 ${h.StopLoss}｜持有 ${h.DaysHeld} 天</div>
+      // 當日持股快照 (優先讀 HoldingsSnapshot，若舊資料無快照且為最後一日則讀 Holdings)
+      let snap = [];
+      try { if (pt.HoldingsSnapshot) snap = JSON.parse(pt.HoldingsSnapshot); } catch (e) {}
+      if ((!pt.HoldingsSnapshot || snap.length === 0) && idx === BOT_CURVE.length - 1) {
+        snap = APP.holdings.filter(h => h.Mode === 'AUTO_BOT' && h.Status === 'OPEN').map(h => {
+          const log = APP.dailyLogs.find(d => String(d.Code) === String(h.Code));
+          const cur = log ? Number(log.Close) : Number(h.AvgCost);
+          return {
+            code: h.Code, name: h.Name, stage: h.Stage, shares: h.Shares, avgCost: h.AvgCost,
+            curPrice: cur, stopLoss: h.StopLoss, daysHeld: h.DaysHeld,
+            pnlPct: Number((((cur - Number(h.AvgCost)) / Number(h.AvgCost)) * 100).toFixed(2))
+          };
+        });
+      }
+
+      document.getElementById('botSnapDate').textContent = cutoffDate;
+      document.getElementById('botSnapTone').textContent = pt.MktTone || '固定手冊規則';
+      document.getElementById('botOpenHoldings').innerHTML = snap.length === 0
+        ? `<div style="font-size:12px; color:#64748b;">截至 ${cutoffDate} 機器人空手觀察中。</div>`
+        : snap.map(h => `
+            <div style="padding:10px; border-radius:12px; background:#f8fafc; border:1px solid #e2e8f0; margin-bottom:8px;">
+              <div style="display:flex; justify-content:space-between; font-weight:800;">
+                <span>${h.name} ${h.code} (第${h.stage}批)</span>
+                <span class="${h.pnlPct >= 0 ? 'up' : 'down'}">${h.pnlPct >= 0 ? '+' : ''}${h.pnlPct}%</span>
               </div>
-            `;
-          }).join('');
+              <div style="font-size:12px; color:#475569; margin-top:4px;">${h.shares}股｜均價 ${h.avgCost}｜收盤 ${h.curPrice}｜停損 ${h.stopLoss}｜持有 ${h.daysHeld} 天</div>
+            </div>
+          `).join('');
 
-      // 自動買賣明細
-      document.getElementById('botTradesBody').innerHTML = trades.length === 0
-        ? `<tr><td colspan="8" style="text-align:center; color:#64748b;">尚無自動交易紀錄</td></tr>`
-        : trades.map(t => {
+      document.getElementById('botTradesBody').innerHTML = subTrades.length === 0
+        ? `<tr><td colspan="8" style="text-align:center; color:#64748b;">截至 ${cutoffDate} 尚無自動交易紀錄</td></tr>`
+        : subTrades.map(t => {
             const cost = (Number(t.Fee || 0) + Number(t.Tax || 0));
             const pnl = t.Side === 'SELL' ? Number(t.NetPnL || 0) : null;
             return `
@@ -993,25 +1077,18 @@
           }).join('');
 
       if (document.getElementById('tab-autobot').classList.contains('active')) {
-        renderAutoBotChart();
+        renderAutoBotChart(subCurve);
       }
     }
 
-    function renderAutoBotChart() {
+    function renderAutoBotChart(curveArg) {
       const container = document.getElementById('botChartContainer');
-      const curve = (APP.autoBot && APP.autoBot.equityCurve) || [];
+      const curve = curveArg || BOT_CURVE;
       if (!container || !window.LightweightCharts) return;
       if (curve.length === 0) {
         container.innerHTML = `<div style="padding:90px 16px; text-align:center; color:#94a3b8; font-size:13px;">尚無淨值曲線資料，請先點右上角「🔄 立即掃描」啟動第一天紀錄！</div>`;
         return;
       }
-
-      const dedup = new Map();
-      curve.forEach(c => {
-        const t = fmtDate(c.Date);
-        if (t) dedup.set(t, { time: t, bot: Number(c.BotReturnPct || 0), twii: Number(c.TwiiReturnPct || 0) });
-      });
-      const clean = Array.from(dedup.values()).sort((a, b) => a.time.localeCompare(b.time));
 
       container.innerHTML = '';
       const chart = LightweightCharts.createChart(container, {
@@ -1023,10 +1100,10 @@
       });
 
       const botLine = chart.addLineSeries({ color: '#ef4444', lineWidth: 2.5, title: '機器人%' });
-      botLine.setData(clean.map(x => ({ time: x.time, value: x.bot })));
+      botLine.setData(curve.map(x => ({ time: x._date || fmtDate(x.Date), value: Number(x.BotReturnPct || 0) })));
 
       const twiiLine = chart.addLineSeries({ color: '#3b82f6', lineWidth: 2, title: '大盤%' });
-      twiiLine.setData(clean.map(x => ({ time: x.time, value: x.twii })));
+      twiiLine.setData(curve.map(x => ({ time: x._date || fmtDate(x.Date), value: Number(x.TwiiReturnPct || 0) })));
       chart.timeScale().fitContent();
     }
 
