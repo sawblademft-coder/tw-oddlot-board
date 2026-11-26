@@ -29,7 +29,9 @@ const SHEET_NAMES = {
   HOLDINGS: 'Holdings',
   JOURNAL: 'Trade_Journal',
   FILTERS: 'Filter_Settings',
-  MARKET_INDEX: 'Market_Index'
+  MARKET_INDEX: 'Market_Index',
+  AUTO_EQUITY: 'Auto_Equity_Curve',
+  AUTO_TRADES: 'Auto_Trades'
 };
 
 // ==================== 2. 系統初始化（首次使用執行一次） ====================
@@ -334,11 +336,14 @@ function runDailyAfterHoursScan() {
   // 5. 檢查現有持股與模擬倉（保姆提醒：硬停損 / 時間停損 / 加碼 / 移動停利）
   const holdingAlerts = evaluateHoldings(ss, twseAll, tpexAll, histByCode, cfg);
 
+  // 5.5 執行全自動模擬操盤機器人 (AUTO_BOT，獨立 10 萬元資金池，跑三個月成效評估)
+  const autoBotResult = runAutoBotTrading(ss, todayStr, marketStatus, dailyLogRows, histByCode, cfg);
+
   // 6. 記錄最後更新時間
   setConfigValue(ss, 'LAST_SCAN_TIME', Utilities.formatDate(new Date(), 'Asia/Taipei', 'yyyy-MM-dd HH:mm:ss'));
 
   // 7. 發送 LINE 行動建議推播
-  sendDailyLineNotification(cfg, todayStr, marketStatus, buyCandidates, holdingAlerts, antiAlerts);
+  sendDailyLineNotification(cfg, todayStr, marketStatus, buyCandidates, holdingAlerts, antiAlerts, autoBotResult);
 
   // 8. 預約明日 13:38 精準觸發（週一到週五）
   scheduleNextDailyTrigger();
@@ -538,7 +543,7 @@ function evaluateHoldings(ss, twseAll, tpexAll, histByCode, cfg) {
   const alerts = [];
   for (let i = 1; i < rows.length; i++) {
     const r = rows[i];
-    if (String(r[11]).toUpperCase() !== 'OPEN') continue;
+    if (String(r[11]).toUpperCase() !== 'OPEN' || String(r[1]) === 'AUTO_BOT') continue;
 
     const id = r[0];
     const mode = r[1];
@@ -603,7 +608,7 @@ function evaluateHoldings(ss, twseAll, tpexAll, histByCode, cfg) {
 }
 
 // ==================== 7. LINE Messaging API 推播與週報 ====================
-function sendDailyLineNotification(cfg, dateStr, marketStatus, buyCandidates, holdingAlerts, antiAlerts) {
+function sendDailyLineNotification(cfg, dateStr, marketStatus, buyCandidates, holdingAlerts, antiAlerts, autoBotResult) {
   if (!cfg.LINE_CHANNEL_ACCESS_TOKEN || !cfg.LINE_USER_ID) {
     Logger.log('尚未設定 LINE Token 或 User ID，跳過推播。');
     return;
@@ -638,6 +643,12 @@ function sendDailyLineNotification(cfg, dateStr, marketStatus, buyCandidates, ho
     lines.push('');
     lines.push(`⚠️ 【高檔/空頭反指標警戒 (${antiAlerts.length}檔)】`);
     lines.push(antiAlerts.slice(0, 5).map(a => `${a.code}${a.name}`).join('、'));
+  }
+
+  if (autoBotResult) {
+    const sign = autoBotResult.returnPct >= 0 ? '+' : '';
+    lines.push('');
+    lines.push(`🤖 【自動模擬倉】淨值 $${autoBotResult.equity.toLocaleString()} (${sign}${autoBotResult.returnPct.toFixed(2)}%)｜${autoBotResult.summaryText}`);
   }
 
   if (cfg.WEB_APP_URL) {
@@ -797,7 +808,8 @@ function doGet(e) {
     holdings: getSheetObjects(ss, SHEET_NAMES.HOLDINGS),
     journal: getSheetObjects(ss, SHEET_NAMES.JOURNAL).slice(-50).reverse(),
     stats: getSheetObjects(ss, SHEET_NAMES.STATS),
-    watchlist: getSheetObjects(ss, SHEET_NAMES.WATCHLIST)
+    watchlist: getSheetObjects(ss, SHEET_NAMES.WATCHLIST),
+    autoBot: getAutoBotDashboardData(ss)
   });
 }
 
@@ -891,6 +903,11 @@ function doPost(e) {
     if (action === 'manualScan') {
       const summary = runDailyAfterHoursScan();
       return jsonResponse({ ok: true, summary });
+    }
+
+    if (action === 'resetAutoBot') {
+      resetAutoBotExperiment(ss);
+      return jsonResponse({ ok: true });
     }
 
     return jsonResponse({ ok: false, error: 'UNKNOWN_ACTION' });
@@ -1395,4 +1412,229 @@ function getDefault100Watchlist() {
     ['6472', '保瑞', '生技', 'TWSE', '穩健', 'CDMO生技代工龍頭', true],
     ['1760', '寶齡富錦', '生技', 'TWSE', '觀察', '中小型生技波動觀察', true]
   ];
+}
+
+
+// ==================== 13. 全自動模擬操盤機器人 (AUTO_BOT 三個月成效評估) ====================
+function calcBotFee(amount) {
+  return Math.max(1, Math.round(amount * 0.001425 * 0.6));
+}
+
+function calcBotTax(code, amount) {
+  const rate = /^00/.test(String(code)) ? 0.001 : 0.003;
+  return Math.round(amount * rate);
+}
+
+function runAutoBotTrading(ss, todayStr, marketStatus, dailyLogRows, histByCode, cfg) {
+  const BOT_INIT_CAP = 100000;
+  const eqSheet = getOrCreateSheet(ss, SHEET_NAMES.AUTO_EQUITY, ['Date', 'Cash', 'MarketValue', 'TotalEquity', 'BotReturnPct', 'TwiiClose', 'TwiiReturnPct', 'ActionsSummary']);
+  const trSheet = getOrCreateSheet(ss, SHEET_NAMES.AUTO_TRADES, ['Id', 'Date', 'Code', 'Name', 'Side', 'Stage', 'Shares', 'Price', 'Amount', 'Fee', 'Tax', 'NetPnL', 'Reason']);
+  const hSheet = ss.getSheetByName(SHEET_NAMES.HOLDINGS);
+
+  // 初始化機器人起跑基準
+  let cash = cfg.AUTO_BOT_CASH !== undefined && cfg.AUTO_BOT_CASH !== '' ? Number(cfg.AUTO_BOT_CASH) : BOT_INIT_CAP;
+  let startDate = String(cfg.AUTO_BOT_START_DATE || '');
+  let startTwii = Number(cfg.AUTO_BOT_START_TWII || 0);
+  if (!startDate || !startTwii) {
+    startDate = todayStr;
+    startTwii = Number(marketStatus.close || 1);
+    setConfigValue(ss, 'AUTO_BOT_START_DATE', startDate);
+    setConfigValue(ss, 'AUTO_BOT_START_TWII', startTwii);
+    setConfigValue(ss, 'AUTO_BOT_CASH', cash);
+  }
+
+  // 建立今日掃描結果 Map
+  const logMap = {};
+  dailyLogRows.forEach(r => {
+    logMap[String(r[1])] = {
+      code: String(r[1]), name: String(r[2]), close: Number(r[3]), changePct: Number(r[4]),
+      volume: Number(r[5]), hits: String(r[6]).split(',').filter(Boolean),
+      action: String(r[7]), reason: String(r[8]), recShares: Number(r[9]),
+      limitPrice: Number(r[10]), stopLoss: Number(r[11]), instDays: Number(r[14]), c02Status: String(r[15])
+    };
+  });
+
+  const actionsTaken = [];
+  const hRows = hSheet.getDataRange().getValues();
+
+  // --- 步驟 A：檢查現有 AUTO_BOT 持股 (出場與加碼) ---
+  for (let i = 1; i < hRows.length; i++) {
+    const r = hRows[i];
+    if (String(r[1]) !== 'AUTO_BOT' || String(r[11]).toUpperCase() !== 'OPEN') continue;
+
+    const rowIdx = i + 1;
+    const code = normCode(r[2]);
+    const name = String(r[3]);
+    let stage = Number(r[4]);
+    let shares = Number(r[5]);
+    let avgCost = Number(r[6]);
+    let stopLoss = Number(r[7]);
+    const entryDate = formatDateVal(r[9]);
+    const daysHeld = Number(r[10] || 0) + (entryDate === todayStr ? 0 : 1);
+
+    const series = histByCode[code] || [];
+    const todayInfo = logMap[code];
+    if (!todayInfo || series.length < 25) continue;
+
+    const close = todayInfo.close;
+    const pnlPct = ((close - avgCost) / avgCost) * 100;
+    const n = series.length;
+    const sma5 = calcSMA(series, 5, n - 1);
+    const sma5Prev = calcSMA(series, 5, n - 2);
+    const sma20 = calcSMA(series, 20, n - 1);
+    const macd = calcMACD(series);
+    const isHalfBodyDown = todayInfo.hits.includes('反下半身');
+
+    hSheet.getRange(rowIdx, 9).setValue(Math.max(Number(r[8]) || avgCost, close));
+    if (entryDate !== todayStr) hSheet.getRange(rowIdx, 11).setValue(daysHeld);
+
+    // 若今日剛買進同一檔，當日不觸發隔日出場
+    if (entryDate === todayStr) continue;
+
+    let sellShares = 0;
+    let sellReason = '';
+
+    if (close <= stopLoss || close < sma20 * 0.995) {
+      sellShares = shares;
+      sellReason = `硬停損出場 (收盤${close}<=防守${stopLoss})`;
+    } else if (pnlPct >= 15 && shares >= 3) {
+      sellShares = Math.max(1, Math.floor(shares / 3));
+      sellReason = `移動停利一 (獲利${pnlPct.toFixed(1)}%先落袋1/3)`;
+    } else if (isHalfBodyDown && shares >= 2) {
+      sellShares = Math.max(1, Math.floor(shares / 2));
+      sellReason = `移動停利二 (反下半身跌破5日線減碼)`;
+    } else if (daysHeld >= 5 && Math.abs(pnlPct) < 2.5 && Math.abs(sma5 - sma5Prev) / Math.max(1, sma5) < 0.002 && macd.hist < macd.prevHist) {
+      sellShares = Math.max(1, Math.floor(shares / 2));
+      sellReason = `時間停損 (橫盤${daysHeld}日動能衰竭減半)`;
+    }
+
+    if (sellShares > 0) {
+      const amount = Math.round(sellShares * close);
+      const fee = calcBotFee(amount);
+      const tax = calcBotTax(code, amount);
+      const netProceeds = amount - fee - tax;
+      const buyFeeEst = calcBotFee(Math.round(sellShares * avgCost));
+      const netPnL = Math.round(netProceeds - (sellShares * avgCost) - buyFeeEst);
+
+      cash += netProceeds;
+      const leftShares = shares - sellShares;
+      hSheet.getRange(rowIdx, 6).setValue(leftShares);
+      if (leftShares <= 0) {
+        hSheet.getRange(rowIdx, 12).setValue('CLOSED');
+      } else {
+        // 移動停利後上移停損至成本保本線
+        hSheet.getRange(rowIdx, 8).setValue(Math.max(stopLoss, avgCost));
+      }
+      trSheet.appendRow(['B' + Date.now(), todayStr, code, name, 'SELL', stage, sellShares, close, amount, fee, tax, netPnL, sellReason]);
+      actionsTaken.push(`賣${name}${sellShares}股`);
+    }
+    // 檢查加碼 (第2批 / 第3批)
+    else if (stage < 3 && cash >= BOT_INIT_CAP * 0.30) {
+      const canAdd2 = stage === 1 && pnlPct >= 4 && close > sma5 && sma5 > sma5Prev;
+      const canAdd3 = stage === 2 && pnlPct >= 8 && close > sma5;
+      if (canAdd2 || canAdd3) {
+        const addBudget = (BOT_INIT_CAP * 0.24) / 3;
+        const execPrice = todayInfo.limitPrice;
+        const addShares = Math.floor(addBudget / execPrice);
+        const amount = Math.round(addShares * execPrice);
+        const fee = calcBotFee(amount);
+        if (addShares >= 1 && (cash - amount - fee) >= BOT_INIT_CAP * 0.30) {
+          cash -= (amount + fee);
+          const newShares = shares + addShares;
+          const newAvg = Number((((shares * avgCost) + amount) / newShares).toFixed(2));
+          const newStage = stage + 1;
+          const newStop = newStage === 3 ? newAvg : roundToTick((newAvg * 0.95));
+          hSheet.getRange(rowIdx, 5).setValue(newStage);
+          hSheet.getRange(rowIdx, 6).setValue(newShares);
+          hSheet.getRange(rowIdx, 7).setValue(newAvg);
+          hSheet.getRange(rowIdx, 8).setValue(Math.max(stopLoss, newStop));
+          trSheet.appendRow(['B' + Date.now(), todayStr, code, name, 'BUY', newStage, addShares, execPrice, amount, fee, 0, 0, `第${newStage}批順勢加碼(+${pnlPct.toFixed(1)}%)並上移停損`]);
+          actionsTaken.push(`加碼${name}${addShares}股`);
+        }
+      }
+    }
+  }
+
+  // --- 步驟 B：檢查新進場試單 (嚴守最多4檔、保留30%現金、空頭警戒不開新倉) ---
+  const updatedHoldings = hSheet.getDataRange().getValues().slice(1).filter(r => String(r[1]) === 'AUTO_BOT' && String(r[11]).toUpperCase() === 'OPEN');
+  const heldCodes = new Set(updatedHoldings.map(r => normCode(r[2])));
+  const minCashKeep = marketStatus.tone === '空頭警戒' ? BOT_INIT_CAP * 0.50 : BOT_INIT_CAP * 0.30;
+
+  if (marketStatus.tone !== '空頭警戒' && updatedHoldings.length < 4 && cash > minCashKeep) {
+    const candidates = Object.values(logMap)
+      .filter(x => x.action === '試單買進' && !heldCodes.has(x.code) && x.recShares >= 1)
+      .sort((a, b) => {
+        if (b.hits.length !== a.hits.length) return b.hits.length - a.hits.length;
+        const aC02 = a.hits.includes('C02') ? 1 : 0;
+        const bC02 = b.hits.includes('C02') ? 1 : 0;
+        if (bC02 !== aC02) return bC02 - aC02;
+        return b.volume - a.volume;
+      });
+
+    let openSlots = 4 - updatedHoldings.length;
+    for (let k = 0; k < candidates.length && openSlots > 0; k++) {
+      const c = candidates[k];
+      const execPrice = c.limitPrice;
+      const buyShares = c.recShares;
+      const amount = Math.round(buyShares * execPrice);
+      const fee = calcBotFee(amount);
+      if ((cash - amount - fee) >= minCashKeep) {
+        cash -= (amount + fee);
+        hSheet.appendRow(['B' + Date.now() + k, 'AUTO_BOT', c.code, c.name, 1, buyShares, execPrice, c.stopLoss, execPrice, todayStr, 0, 'OPEN']);
+        trSheet.appendRow(['B' + Date.now() + k, todayStr, c.code, c.name, 'BUY', 1, buyShares, execPrice, amount, fee, 0, 0, `第1批試單：${c.reason}`]);
+        actionsTaken.push(`買${c.name}${buyShares}股`);
+        openSlots--;
+      }
+    }
+  }
+
+  // --- 步驟 C：結算當日淨值並寫入 Auto_Equity_Curve ---
+  setConfigValue(ss, 'AUTO_BOT_CASH', Math.round(cash));
+  const finalOpen = hSheet.getDataRange().getValues().slice(1).filter(r => String(r[1]) === 'AUTO_BOT' && String(r[11]).toUpperCase() === 'OPEN');
+  let marketValue = 0;
+  finalOpen.forEach(r => {
+    const code = normCode(r[2]);
+    const shares = Number(r[5]);
+    const curClose = logMap[code] ? logMap[code].close : Number(r[6]);
+    marketValue += Math.round(shares * curClose);
+  });
+
+  const totalEquity = Math.round(cash + marketValue);
+  const botReturnPct = Number((((totalEquity - BOT_INIT_CAP) / BOT_INIT_CAP) * 100).toFixed(2));
+  const twiiClose = Number(marketStatus.close || startTwii);
+  const twiiReturnPct = Number((((twiiClose - startTwii) / startTwii) * 100).toFixed(2));
+  const summaryText = actionsTaken.length > 0 ? actionsTaken.join('、') : '今日無交易 (持有觀察)';
+
+  removeRowsByDate(eqSheet, todayStr);
+  eqSheet.appendRow([todayStr, Math.round(cash), marketValue, totalEquity, botReturnPct, twiiClose, twiiReturnPct, summaryText]);
+
+  return { equity: totalEquity, returnPct: botReturnPct, twiiReturnPct, summaryText };
+}
+
+function resetAutoBotExperiment(ss) {
+  const hSheet = ss.getSheetByName(SHEET_NAMES.HOLDINGS);
+  const hRows = hSheet.getDataRange().getValues();
+  for (let i = hRows.length - 1; i >= 1; i--) {
+    if (String(hRows[i][1]) === 'AUTO_BOT') hSheet.deleteRow(i + 1);
+  }
+  const eqSheet = ss.getSheetByName(SHEET_NAMES.AUTO_EQUITY);
+  if (eqSheet && eqSheet.getLastRow() > 1) eqSheet.getRange(2, 1, eqSheet.getLastRow() - 1, 8).clearContent();
+  const trSheet = ss.getSheetByName(SHEET_NAMES.AUTO_TRADES);
+  if (trSheet && trSheet.getLastRow() > 1) trSheet.getRange(2, 1, trSheet.getLastRow() - 1, 13).clearContent();
+
+  setConfigValue(ss, 'AUTO_BOT_CASH', 100000);
+  setConfigValue(ss, 'AUTO_BOT_START_DATE', '');
+  setConfigValue(ss, 'AUTO_BOT_START_TWII', 0);
+}
+
+function getAutoBotDashboardData(ss) {
+  const eqSheet = ss.getSheetByName(SHEET_NAMES.AUTO_EQUITY);
+  const trSheet = ss.getSheetByName(SHEET_NAMES.AUTO_TRADES);
+  const cfg = getConfigMap(ss);
+  return {
+    startDate: String(cfg.AUTO_BOT_START_DATE || ''),
+    cash: cfg.AUTO_BOT_CASH !== undefined && cfg.AUTO_BOT_CASH !== '' ? Number(cfg.AUTO_BOT_CASH) : 100000,
+    equityCurve: eqSheet ? getSheetObjects(ss, SHEET_NAMES.AUTO_EQUITY) : [],
+    trades: trSheet ? getSheetObjects(ss, SHEET_NAMES.AUTO_TRADES).slice(-100).reverse() : []
+  };
 }

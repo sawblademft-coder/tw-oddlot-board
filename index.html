@@ -213,7 +213,7 @@
       position: fixed; bottom: 0; left: 0; right: 0; z-index: 45;
       background: rgba(255, 255, 255, 0.9); backdrop-filter: blur(18px);
       border-top: 1px solid rgba(203, 213, 225, 0.7);
-      display: grid; grid-template-columns: repeat(5, 1fr); padding: 6px 2px 10px;
+      display: grid; grid-template-columns: repeat(6, 1fr); padding: 6px 2px 10px;
     }
     .bottom-nav button {
       border: none; background: transparent; padding: 5px 2px;
@@ -248,6 +248,7 @@
       <button onclick="switchTab('tab-check')">15分鐘檢核＆試算</button>
       <button onclick="switchTab('tab-journal')">持股與日誌</button>
       <button onclick="switchTab('tab-stats')">100檔滾動統計</button>
+      <button onclick="switchTab('tab-autobot')">🤖 自動模擬</button>
       <button onclick="switchTab('tab-sop')">操作流程SOP</button>
     </nav>
 
@@ -544,14 +545,72 @@
         </div>
       </div>
     </section>
+    <!-- ==================== 分頁 6：全自動模擬操盤 (三個月成效評估) ==================== -->
+    <section id="tab-autobot" class="tab-pane">
+      <div class="widget-grid">
+        <div class="widget w-blue">
+          <div class="w-head"><span>🤖 機器人總淨值</span><span id="botStartDate">-</span></div>
+          <div class="w-val" id="botEquityVal">$100,000</div>
+          <div class="w-foot"><span id="botReturnVal">+0.00%</span><span id="botCashVal">現金 $100,000</span></div>
+        </div>
+        <div class="widget w-red" id="botAlphaWidget">
+          <div class="w-head"><span>📊 對比同期大盤</span><span>Alpha</span></div>
+          <div class="w-val" id="botAlphaVal">+0.00%</div>
+          <div class="w-foot"><span id="botTwiiRet">大盤 +0.00%</span><span>超額報酬</span></div>
+        </div>
+        <div class="widget w-black">
+          <div class="w-head"><span>🎯 勝率 ＆ 賺賠比</span><span>已結算</span></div>
+          <div class="w-val" id="botWinRateVal">- %</div>
+          <div class="w-foot"><span id="botPfVal">賺賠比 -</span><span id="botTradeCnt">0 筆平倉</span></div>
+        </div>
+        <div class="widget w-amber">
+          <div class="w-head"><span>📉 最大回撤 (MDD)</span><span>90天實驗</span></div>
+          <div class="w-val" id="botMddVal">0.00%</div>
+          <div class="w-foot"><span id="botDaysProgress">已跑 0 / 90 日</span><span>嚴守手冊</span></div>
+        </div>
+      </div>
+
+      <!-- 雙線報酬率曲線圖 -->
+      <div class="card-dark" style="margin-bottom:14px;">
+        <div class="card-title-row" style="flex-wrap:wrap;">
+          <div class="card-title">📈 淨值報酬率 vs 同期大盤 (紅線:機器人 / 藍線:加權指數)</div>
+          <button class="btn-sm" style="background:#334155; color:#fff;" onclick="resetAutoBot()">🔄 重置三個月實驗</button>
+        </div>
+        <div id="botChartContainer" style="width:100%; height:260px;"></div>
+      </div>
+
+      <div class="panel-grid two-col">
+        <div class="card-light">
+          <div class="card-title-row">
+            <div class="card-title">🤖 機器人目前持股 (獨立 $100,000 資金池)</div>
+            <span class="badge badge-light-warn">固定手冊規則</span>
+          </div>
+          <div id="botOpenHoldings"></div>
+        </div>
+
+        <div class="card-light">
+          <div class="card-title-row">
+            <div class="card-title">🧾 自動買賣明細 (含手續費6折與證交稅)</div>
+          </div>
+          <div class="table-wrap" style="max-height:360px; overflow-y:auto;">
+            <table>
+              <thead><tr><th>日期</th><th>標的</th><th>動作</th><th>股數</th><th>價格</th><th>稅費</th><th>淨損益</th><th>原因</th></tr></thead>
+              <tbody id="botTradesBody"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </section>
+
   </main>
 
   <nav class="bottom-nav" id="mobileNav">
     <button class="active" onclick="switchTab('tab-today')"><span>📊</span><span>戰情室</span></button>
-    <button onclick="switchTab('tab-check')"><span>✅</span><span>檢核試算</span></button>
-    <button onclick="switchTab('tab-journal')"><span>📒</span><span>持股日誌</span></button>
-    <button onclick="switchTab('tab-stats')"><span>📈</span><span>滾動統計</span></button>
-    <button onclick="switchTab('tab-sop')"><span>🧭</span><span>操作SOP</span></button>
+    <button onclick="switchTab('tab-check')"><span>✅</span><span>檢核</span></button>
+    <button onclick="switchTab('tab-journal')"><span>📒</span><span>日誌</span></button>
+    <button onclick="switchTab('tab-stats')"><span>📈</span><span>統計</span></button>
+    <button onclick="switchTab('tab-autobot')"><span>🤖</span><span>自動</span></button>
+    <button onclick="switchTab('tab-sop')"><span>🧭</span><span>SOP</span></button>
   </nav>
 
   <div id="setupModal" class="modal-backdrop hidden">
@@ -588,7 +647,8 @@
       chartInstance: null,
       config: { totalCapital: 100000, riskPct: 0.01, maxSinglePct: 0.24, minCashPct: 0.30, maxHoldings: 4, tradingMode: 'PAPER', lastScanTime: '' },
       market: { date: '-', close: 0, changePct: 0, tone: '尚無資料', cashAdvice: '30% 以上' },
-      filters: [], dailyLogs: [], holdings: [], journal: [], stats: [], watchlist: []
+      filters: [], dailyLogs: [], holdings: [], journal: [], stats: [], watchlist: [],
+      autoBot: { startDate: '', cash: 100000, equityCurve: [], trades: [] }
     };
 
     const CHECKLIST_ITEMS = [
@@ -643,6 +703,7 @@
         APP.config = data.config; APP.market = data.market; APP.filters = data.filters || [];
         APP.dailyLogs = data.dailyLogs || []; APP.holdings = data.holdings || [];
         APP.journal = data.journal || []; APP.stats = data.stats || []; APP.watchlist = data.watchlist || [];
+        APP.autoBot = data.autoBot || { startDate: '', cash: 100000, equityCurve: [], trades: [] };
         renderAll();
       } catch (e) {
         alert('連線 GAS 失敗，可先切換「模擬範例預覽」查看畫面。\n錯誤：' + e.message);
@@ -678,11 +739,12 @@
       document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
       document.getElementById(tabId).classList.add('active');
       document.querySelectorAll('#desktopNav button, #mobileNav button').forEach(b => b.classList.remove('active'));
-      const idx = ['tab-today', 'tab-check', 'tab-journal', 'tab-stats', 'tab-sop'].indexOf(tabId);
+      const idx = ['tab-today', 'tab-check', 'tab-journal', 'tab-stats', 'tab-autobot', 'tab-sop'].indexOf(tabId);
       const dBtns = document.querySelectorAll('#desktopNav button');
       const mBtns = document.querySelectorAll('#mobileNav button');
       if (dBtns[idx]) dBtns[idx].classList.add('active');
       if (mBtns[idx]) mBtns[idx].classList.add('active');
+      if (tabId === 'tab-autobot') renderAutoBotChart();
     }
 
     function renderAll() {
@@ -724,6 +786,140 @@
       renderHoldingsAndJournal();
       renderStatsTable();
       renderSopOverview();
+      renderAutoBot();
+    }
+
+    function renderAutoBot() {
+      const bot = APP.autoBot || { startDate: '', cash: 100000, equityCurve: [], trades: [] };
+      const curve = bot.equityCurve || [];
+      const trades = bot.trades || [];
+      const latest = curve.length > 0 ? curve[curve.length - 1] : null;
+
+      const equity = latest ? Number(latest.TotalEquity) : 100000;
+      const botRet = latest ? Number(latest.BotReturnPct) : 0;
+      const twiiRet = latest ? Number(latest.TwiiReturnPct) : 0;
+      const alpha = Number((botRet - twiiRet).toFixed(2));
+      const cash = latest ? Number(latest.Cash) : Number(bot.cash || 100000);
+
+      document.getElementById('botStartDate').textContent = bot.startDate ? `起跑 ${fmtDate(bot.startDate)}` : '待首次掃描起跑';
+      document.getElementById('botEquityVal').textContent = '$' + equity.toLocaleString();
+      document.getElementById('botReturnVal').textContent = `${botRet >= 0 ? '+' : ''}${botRet.toFixed(2)}%`;
+      document.getElementById('botCashVal').textContent = '現金 $' + cash.toLocaleString();
+
+      document.getElementById('botAlphaVal').textContent = `${alpha >= 0 ? '+' : ''}${alpha.toFixed(2)}%`;
+      document.getElementById('botTwiiRet').textContent = `大盤 ${twiiRet >= 0 ? '+' : ''}${twiiRet.toFixed(2)}%`;
+      document.getElementById('botAlphaWidget').className = 'widget ' + (alpha >= 0 ? 'w-red' : 'w-green');
+
+      // 勝率與賺賠比 (已平倉 SELL 紀錄)
+      const closedTrades = trades.filter(t => t.Side === 'SELL');
+      const wins = closedTrades.filter(t => Number(t.NetPnL) > 0);
+      const losses = closedTrades.filter(t => Number(t.NetPnL) < 0);
+      const winRate = closedTrades.length > 0 ? ((wins.length / closedTrades.length) * 100).toFixed(1) : '-';
+      const sumWin = wins.reduce((a, b) => a + Number(b.NetPnL), 0);
+      const sumLoss = Math.abs(losses.reduce((a, b) => a + Number(b.NetPnL), 0));
+      const pf = sumLoss > 0 ? (sumWin / sumLoss).toFixed(2) : (sumWin > 0 ? '∞' : '-');
+
+      document.getElementById('botWinRateVal').textContent = winRate === '-' ? '- %' : `${winRate}%`;
+      document.getElementById('botPfVal').textContent = `賺賠比 ${pf}`;
+      document.getElementById('botTradeCnt').textContent = `${closedTrades.length} 筆平倉`;
+
+      // 最大回撤 MDD
+      let peak = 100000, maxDd = 0;
+      curve.forEach(c => {
+        const eq = Number(c.TotalEquity || 100000);
+        if (eq > peak) peak = eq;
+        const dd = ((eq - peak) / peak) * 100;
+        if (dd < maxDd) maxDd = dd;
+      });
+      document.getElementById('botMddVal').textContent = `${maxDd.toFixed(2)}%`;
+      document.getElementById('botDaysProgress').textContent = `已跑 ${curve.length} / 90 日`;
+
+      // 目前機器人持股
+      const openBot = APP.holdings.filter(h => h.Mode === 'AUTO_BOT' && h.Status === 'OPEN');
+      document.getElementById('botOpenHoldings').innerHTML = openBot.length === 0
+        ? `<div style="font-size:12px; color:#64748b;">目前機器人空手觀察中（尚無符合共振標的或已出場）。</div>`
+        : openBot.map(h => {
+            const log = APP.dailyLogs.find(d => String(d.Code) === String(h.Code));
+            const cur = log ? Number(log.Close) : Number(h.AvgCost);
+            const pct = (((cur - Number(h.AvgCost)) / Number(h.AvgCost)) * 100).toFixed(2);
+            return `
+              <div style="padding:10px; border-radius:12px; background:#f8fafc; border:1px solid #e2e8f0; margin-bottom:8px;">
+                <div style="display:flex; justify-content:space-between; font-weight:800;">
+                  <span>${h.Name} ${h.Code} (第${h.Stage}批)</span>
+                  <span class="${pct >= 0 ? 'up' : 'down'}">${pct >= 0 ? '+' : ''}${pct}%</span>
+                </div>
+                <div style="font-size:12px; color:#475569; margin-top:4px;">${h.Shares}股｜均價 ${h.AvgCost}｜現價 ${cur}｜停損 ${h.StopLoss}｜持有 ${h.DaysHeld} 天</div>
+              </div>
+            `;
+          }).join('');
+
+      // 自動買賣明細
+      document.getElementById('botTradesBody').innerHTML = trades.length === 0
+        ? `<tr><td colspan="8" style="text-align:center; color:#64748b;">尚無自動交易紀錄</td></tr>`
+        : trades.map(t => {
+            const cost = (Number(t.Fee || 0) + Number(t.Tax || 0));
+            const pnl = t.Side === 'SELL' ? Number(t.NetPnL || 0) : null;
+            return `
+              <tr>
+                <td>${fmtDate(t.Date)}</td>
+                <td><strong>${t.Name}</strong> ${t.Code}</td>
+                <td class="${t.Side === 'BUY' ? 'up' : 'down'}" style="font-weight:800;">${t.Side === 'BUY' ? `買進(批${t.Stage})` : '賣出'}</td>
+                <td>${t.Shares}</td>
+                <td>${t.Price}</td>
+                <td>$${cost}</td>
+                <td class="${pnl === null ? '' : (pnl >= 0 ? 'up' : 'down')}" style="font-weight:800;">${pnl === null ? '-' : (pnl >= 0 ? '+' : '') + pnl}</td>
+                <td style="white-space:normal; min-width:180px; font-size:11px; color:#475569;">${t.Reason || ''}</td>
+              </tr>
+            `;
+          }).join('');
+
+      if (document.getElementById('tab-autobot').classList.contains('active')) {
+        renderAutoBotChart();
+      }
+    }
+
+    function renderAutoBotChart() {
+      const container = document.getElementById('botChartContainer');
+      const curve = (APP.autoBot && APP.autoBot.equityCurve) || [];
+      if (!container || !window.LightweightCharts) return;
+      if (curve.length === 0) {
+        container.innerHTML = `<div style="padding:90px 16px; text-align:center; color:#94a3b8; font-size:13px;">尚無淨值曲線資料，請先點右上角「🔄 立即掃描」啟動第一天紀錄！</div>`;
+        return;
+      }
+
+      const dedup = new Map();
+      curve.forEach(c => {
+        const t = fmtDate(c.Date);
+        if (t) dedup.set(t, { time: t, bot: Number(c.BotReturnPct || 0), twii: Number(c.TwiiReturnPct || 0) });
+      });
+      const clean = Array.from(dedup.values()).sort((a, b) => a.time.localeCompare(b.time));
+
+      container.innerHTML = '';
+      const chart = LightweightCharts.createChart(container, {
+        layout: { background: { color: '#0f1219' }, textColor: '#cbd5e1' },
+        grid: { vertLines: { color: 'rgba(148,163,184,0.1)' }, horzLines: { color: 'rgba(148,163,184,0.1)' } },
+        width: container.clientWidth || container.parentElement.clientWidth || 580,
+        height: 260,
+        timeScale: { borderColor: 'rgba(148,163,184,0.2)' }
+      });
+
+      const botLine = chart.addLineSeries({ color: '#ef4444', lineWidth: 2.5, title: '機器人%' });
+      botLine.setData(clean.map(x => ({ time: x.time, value: x.bot })));
+
+      const twiiLine = chart.addLineSeries({ color: '#3b82f6', lineWidth: 2, title: '大盤%' });
+      twiiLine.setData(clean.map(x => ({ time: x.time, value: x.twii })));
+      chart.timeScale().fitContent();
+    }
+
+    async function resetAutoBot() {
+      if (!confirm('確定要重置「三個月自動模擬實驗」嗎？這會清除機器人目前的模擬持股、淨值曲線與交易明細，並重新以 $100,000 起跑。')) return;
+      if (APP.isDemo) return alert('範例預覽模式無法重置雲端。');
+      await fetch(APP.gasUrl, {
+        method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify({ pin: APP.pin, action: 'resetAutoBot' })
+      });
+      alert('已重置自動模擬操盤實驗！');
+      fetchDashboardData();
     }
 
     function renderSopOverview() {
@@ -1144,8 +1340,24 @@
         { Code: '0050', Name: '元大台灣50', Close: 194.5, ChangePct: 1.04, VolumeLots: 14500, Hits: 'C08,C09,C01,鳥嘴', Action: '試單買進', Reason: '符合必備底線；出現「鳥嘴」回測20日線再上揚', RecShares: 41, LimitPrice: 195.0, StopLoss: 182.0, PE: '-', Yield: '2.8', InstDays: 4, C02Status: '穩健', TechJson: JSON.stringify({sma5:192.1,sma20:190.4,sma60:186.2,sma100:181.0,sma300:168.5,ppp:'PPP多頭排列',k:52.1,d:47.8,macdDir:'紅柱擴大/翻正',upStreak:1}) },
         { Code: '1519', Name: '華城', Close: 685, ChangePct: 4.10, VolumeLots: 9800, Hits: 'C08,C09,C01,EXCL_9DAY', Action: '反指標警戒', Reason: '連漲第8根K線(九日法則)，高檔過熱不追', RecShares: 0, LimitPrice: 686, StopLoss: 635, PE: '42.1', Yield: '0.9', InstDays: 2, C02Status: '穩健', TechJson: JSON.stringify({sma5:660,sma20:630,sma60:605,ppp:'PPP多頭排列',k:88.4,d:84.1,macdDir:'動能收斂',upStreak:8}) }
       ];
-      APP.holdings = [{ Id: 'T1', Mode: 'PAPER', Code: '2317', Name: '鴻海', Stage: 1, Shares: 40, AvgCost: 205, StopLoss: 190, DaysHeld: 3, Status: 'OPEN' }];
+      APP.holdings = [
+        { Id: 'T1', Mode: 'PAPER', Code: '2317', Name: '鴻海', Stage: 1, Shares: 40, AvgCost: 205, StopLoss: 190, DaysHeld: 3, Status: 'OPEN' },
+        { Id: 'B1', Mode: 'AUTO_BOT', Code: '2330', Name: '台積電', Stage: 1, Shares: 7, AvgCost: 1015, StopLoss: 945, DaysHeld: 4, Status: 'OPEN' }
+      ];
       APP.journal = [{ Date: '2026-11-22', Mode: 'PAPER', Code: '2317', Name: '鴻海', Side: 'BUY', Shares: 40, Price: 205, PnL: 0 }];
+      APP.autoBot = {
+        startDate: '2026-11-20',
+        cash: 92890,
+        equityCurve: [
+          { Date: '2026-11-20', Cash: 92890, MarketValue: 7105, TotalEquity: 99995, BotReturnPct: 0.0, TwiiReturnPct: 0.0 },
+          { Date: '2026-11-21', Cash: 92890, MarketValue: 7180, TotalEquity: 100070, BotReturnPct: 0.07, TwiiReturnPct: -0.2 },
+          { Date: '2026-11-24', Cash: 92890, MarketValue: 7210, TotalEquity: 100100, BotReturnPct: 0.10, TwiiReturnPct: 0.15 },
+          { Date: '2026-11-25', Cash: 92890, MarketValue: 7245, TotalEquity: 100135, BotReturnPct: 0.14, TwiiReturnPct: 0.05 }
+        ],
+        trades: [
+          { Date: '2026-11-20', Code: '2330', Name: '台積電', Side: 'BUY', Stage: 1, Shares: 7, Price: 1015, Fee: 6, Tax: 0, NetPnL: 0, Reason: '第1批試單：符合底線+下半身轉強' }
+        ]
+      };
       APP.stats = [
         { Code: '2330', Name: '台積電', Category: '半導體', LastClose: 1035, BasePassDays: 14, BuySignalDays: 4, AlertDays: 0, AvgVol20Lots: 35100, MonthlyReview: '核心強勢' },
         { Code: '1519', Name: '華城', Category: '重電能源', LastClose: 685, BasePassDays: 11, BuySignalDays: 2, AlertDays: 3, AvgVol20Lots: 8400, MonthlyReview: '觀察中' }
