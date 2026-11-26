@@ -607,16 +607,19 @@
     <section id="tab-backtest" class="tab-pane">
       <div class="card-light" style="margin-bottom:14px;">
         <div class="card-title-row" style="flex-wrap:wrap;">
-          <div class="card-title">🧪 歷史回測（以過去 3～6 個月真實 K 線驗證）</div>
+          <div class="card-title">🧪 歷史回測（1 ～ 12 個月真實 K 線驗證）</div>
           <span class="badge badge-light-warn">純記憶體運算・不影響正式帳戶</span>
         </div>
         <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(160px, 1fr)); gap:10px; align-items:end;">
           <div class="field">
             <label>回測區間 (滾動窗口)</label>
             <select id="btMonths">
+              <option value="1">近 1 個月 (22 交易日)</option>
               <option value="2" selected>近 2 個月 (44 交易日)</option>
               <option value="3">近 3 個月 (65 交易日)</option>
               <option value="6">近 6 個月 (130 交易日)</option>
+              <option value="9">近 9 個月 (195 交易日)</option>
+              <option value="12">近 12 個月 (250 交易日)</option>
             </select>
           </div>
           <div class="field">

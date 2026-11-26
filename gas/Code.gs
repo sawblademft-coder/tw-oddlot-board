@@ -1648,7 +1648,8 @@ function getAutoBotDashboardData(ss) {
 // ==================== 14. 近三個月歷史回測引擎 (純記憶體運算，不寫入試算表) ====================
 function runThreeMonthBacktest(ss, params) {
   const months = Number(params.months || 2);
-  const targetDays = months >= 6 ? 130 : (months >= 3 ? 65 : 44);
+  const daysMap = { 1: 22, 2: 44, 3: 65, 6: 130, 9: 195, 12: 250 };
+  const targetDays = daysMap[months] || 44;
   const maxUpStreak = Number(params.maxUpStreak || 2);
   const triggerMode = String(params.triggerMode || 'STRICT'); // 'STRICT' | 'RELAXED'
   const maxHoldings = Number(params.maxHoldings || 4);
@@ -1683,7 +1684,7 @@ function runThreeMonthBacktest(ss, params) {
   if (sortedAllDates.length < 70) {
     return { error: '歷史資料天數不足（需至少 70 個交易日才能進行回測），請先確認 Batch1~4 已執行 2y 載入。' };
   }
-  const actualDays = Math.min(targetDays, Math.max(40, sortedAllDates.length - 62));
+  const actualDays = Math.min(targetDays, Math.max(20, sortedAllDates.length - 62));
   const btDates = sortedAllDates.slice(-actualDays);
   const btStartDate = btDates[0];
 
@@ -1698,8 +1699,8 @@ function runThreeMonthBacktest(ss, params) {
     stockDateIdx[c] = idxMap;
   });
 
-  // 2. 取得大盤歷史 (^TWII 1y 以覆蓋 6 個月以上)
-  const twiiBars = fetchYahooHistory('^TWII', '1y');
+  // 2. 取得大盤歷史 (^TWII 2y 以覆蓋 12 個月回測 + 前 60 日均線)
+  const twiiBars = fetchYahooHistory('^TWII', '2y');
   const twiiByDate = {};
   twiiBars.forEach(b => { twiiByDate[b.date] = b; });
   const twiiSorted = Object.values(twiiByDate).sort((a, b) => a.date.localeCompare(b.date));
