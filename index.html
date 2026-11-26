@@ -612,10 +612,11 @@
         </div>
         <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(160px, 1fr)); gap:10px; align-items:end;">
           <div class="field">
-            <label>回測區間</label>
+            <label>回測區間 (滾動窗口)</label>
             <select id="btMonths">
+              <option value="2" selected>近 2 個月 (44 交易日)</option>
               <option value="3">近 3 個月 (65 交易日)</option>
-              <option value="6" selected>近 6 個月 (130 交易日)</option>
+              <option value="6">近 6 個月 (130 交易日)</option>
             </select>
           </div>
           <div class="field">
@@ -646,6 +647,22 @@
       </div>
 
       <div id="btResultArea" class="hidden">
+        <!-- 時間點回放切換器 -->
+        <div class="card-dark" style="margin-bottom:14px;">
+          <div class="card-title-row" style="flex-wrap:wrap; margin-bottom:10px;">
+            <div class="card-title">📅 時間點切換檢視（看不同日期的操作效果變化）</div>
+            <div style="display:flex; align-items:center; gap:6px;">
+              <button class="btn-sm" style="background:#334155; color:#fff;" onclick="stepBacktestDay(-1)">◀ 前一天</button>
+              <select id="btDateSelect" onchange="onBtDateSelect(this.value)" style="background:#0f172a; color:#fff; border:1px solid #475569; border-radius:8px; padding:4px 8px; font-size:12px; font-weight:700;"></select>
+              <button class="btn-sm" style="background:#334155; color:#fff;" onclick="stepBacktestDay(1)">後一天 ▶</button>
+            </div>
+          </div>
+          <div style="display:flex; align-items:center; gap:12px;">
+            <input type="range" id="btDaySlider" min="0" max="0" value="0" oninput="renderBacktestAtIndex(Number(this.value))" style="flex:1; accent-color:#3b82f6; cursor:pointer;">
+            <span id="btSliderLabel" style="font-size:12px; font-weight:800; color:#93c5fd; white-space:nowrap;">第 1 / 1 日</span>
+          </div>
+        </div>
+
         <div class="widget-grid">
           <div class="widget w-blue">
             <div class="w-head"><span>💰 回測期末淨值</span><span id="btRange">-</span></div>
@@ -676,15 +693,25 @@
           <div id="btChartContainer" style="width:100%; height:260px;"></div>
         </div>
 
-        <div class="card-light">
-          <div class="card-title-row">
-            <div class="card-title">🧾 回測歷史買賣明細（依時間倒序）</div>
+        <div class="panel-grid two-col">
+          <div class="card-light">
+            <div class="card-title-row">
+              <div class="card-title">📦 截至該日持股快照 (<span id="btSnapDate">-</span>)</div>
+              <span class="badge badge-light-warn" id="btSnapTone">-</span>
+            </div>
+            <div id="btHoldingsSnapshot"></div>
           </div>
-          <div class="table-wrap" style="max-height:380px; overflow-y:auto;">
-            <table>
-              <thead><tr><th>日期</th><th>標的</th><th>動作</th><th>股數</th><th>價格</th><th>稅費</th><th>淨損益</th><th>觸發原因</th></tr></thead>
-              <tbody id="btTradesBody"></tbody>
-            </table>
+
+          <div class="card-light">
+            <div class="card-title-row">
+              <div class="card-title">🧾 截至該日買賣明細（依時間倒序）</div>
+            </div>
+            <div class="table-wrap" style="max-height:380px; overflow-y:auto;">
+              <table>
+                <thead><tr><th>日期</th><th>標的</th><th>動作</th><th>股數</th><th>價格</th><th>稅費</th><th>淨損益</th><th>觸發原因</th></tr></thead>
+                <tbody id="btTradesBody"></tbody>
+              </table>
+            </div>
           </div>
         </div>
       </div>
@@ -1058,27 +1085,100 @@
       }
     }
 
+    let BT_DATA = null;
+
     function renderBacktestResult(bt) {
+      BT_DATA = bt;
       document.getElementById('btResultArea').classList.remove('hidden');
-      document.getElementById('btRange').textContent = `${bt.startDate} ~ ${bt.endDate}`;
-      document.getElementById('btFinalEq').textContent = '$' + Number(bt.finalEquity || 100000).toLocaleString();
-      document.getElementById('btTotalRet').textContent = `${bt.totalReturnPct >= 0 ? '+' : ''}${bt.totalReturnPct}%`;
+      const curve = bt.equityCurve || [];
+      if (curve.length === 0) return;
 
-      document.getElementById('btAlpha').textContent = `${bt.alpha >= 0 ? '+' : ''}${bt.alpha}%`;
-      document.getElementById('btTwiiRet').textContent = `大盤 ${bt.twiiReturnPct >= 0 ? '+' : ''}${bt.twiiReturnPct}%`;
-      document.getElementById('btDaysLabel').textContent = `${bt.daysCount || 65}交易日`;
-      document.getElementById('btAlphaBox').className = 'widget ' + (bt.alpha >= 0 ? 'w-red' : 'w-green');
+      const slider = document.getElementById('btDaySlider');
+      const sel = document.getElementById('btDateSelect');
+      slider.min = 0;
+      slider.max = curve.length - 1;
+      slider.value = curve.length - 1;
+      sel.innerHTML = curve.map((c, i) => `<option value="${i}">${c.date}</option>`).join('');
+      sel.value = String(curve.length - 1);
 
-      document.getElementById('btWinRate').textContent = bt.winRate === null ? '- %' : `${bt.winRate}%`;
-      document.getElementById('btPf').textContent = `賺賠比 ${bt.profitFactor}`;
-      document.getElementById('btTradeStats').textContent = `共 ${bt.totalTrades} 筆`;
-      document.getElementById('btClosedCnt').textContent = `${bt.closedTrades} 筆平倉`;
-      document.getElementById('btMdd').textContent = `${bt.mdd}%`;
-      document.getElementById('btOpenRem').textContent = `期末尚持 ${bt.openRemaining} 檔`;
+      renderBacktestAtIndex(curve.length - 1);
+    }
 
-      document.getElementById('btTradesBody').innerHTML = (!bt.trades || bt.trades.length === 0)
-        ? `<tr><td colspan="8" style="text-align:center; color:#64748b;">此參數組合在近 3 個月內無任何觸發交易（建議放寬連漲限制或改為放寬動能試試）</td></tr>`
-        : bt.trades.map(t => {
+    function stepBacktestDay(delta) {
+      if (!BT_DATA || !BT_DATA.equityCurve) return;
+      const cur = Number(document.getElementById('btDaySlider').value);
+      const next = Math.max(0, Math.min(BT_DATA.equityCurve.length - 1, cur + delta));
+      renderBacktestAtIndex(next);
+    }
+
+    function onBtDateSelect(idxStr) {
+      renderBacktestAtIndex(Number(idxStr));
+    }
+
+    function renderBacktestAtIndex(idx) {
+      if (!BT_DATA || !BT_DATA.equityCurve || !BT_DATA.equityCurve[idx]) return;
+      const curve = BT_DATA.equityCurve;
+      const pt = curve[idx];
+      const subCurve = curve.slice(0, idx + 1);
+      const cutoffDate = pt.date;
+
+      document.getElementById('btDaySlider').value = idx;
+      document.getElementById('btDateSelect').value = String(idx);
+      document.getElementById('btSliderLabel').textContent = `第 ${idx + 1} / ${curve.length} 日`;
+
+      document.getElementById('btRange').textContent = `${BT_DATA.startDate} ~ ${cutoffDate}`;
+      document.getElementById('btFinalEq').textContent = '$' + Number(pt.equity || 100000).toLocaleString();
+      document.getElementById('btTotalRet').textContent = `${pt.botReturnPct >= 0 ? '+' : ''}${pt.botReturnPct}%`;
+
+      const alpha = Number((pt.botReturnPct - pt.twiiReturnPct).toFixed(2));
+      document.getElementById('btAlpha').textContent = `${alpha >= 0 ? '+' : ''}${alpha}%`;
+      document.getElementById('btTwiiRet').textContent = `大盤 ${pt.twiiReturnPct >= 0 ? '+' : ''}${pt.twiiReturnPct}%`;
+      document.getElementById('btDaysLabel').textContent = `累計 ${idx + 1} 交易日`;
+      document.getElementById('btAlphaBox').className = 'widget ' + (alpha >= 0 ? 'w-red' : 'w-green');
+
+      const subTrades = (BT_DATA.trades || []).filter(t => t.date <= cutoffDate);
+      const closed = subTrades.filter(t => t.side === 'SELL');
+      const wins = closed.filter(t => Number(t.netPnL) > 0);
+      const losses = closed.filter(t => Number(t.netPnL) < 0);
+      const sumWin = wins.reduce((a, b) => a + Number(b.netPnL), 0);
+      const sumLoss = Math.abs(losses.reduce((a, b) => a + Number(b.netPnL), 0));
+      const winRate = closed.length > 0 ? ((wins.length / closed.length) * 100).toFixed(1) : null;
+      const pf = sumLoss > 0 ? (sumWin / sumLoss).toFixed(2) : (sumWin > 0 ? '∞' : '-');
+
+      let peak = 100000, mdd = 0;
+      subCurve.forEach(e => {
+        if (e.equity > peak) peak = e.equity;
+        const dd = ((e.equity - peak) / peak) * 100;
+        if (dd < mdd) mdd = dd;
+      });
+
+      const snap = pt.holdingsSnapshot || [];
+      document.getElementById('btWinRate').textContent = winRate === null ? '- %' : `${winRate}%`;
+      document.getElementById('btPf').textContent = `賺賠比 ${pf}`;
+      document.getElementById('btTradeStats').textContent = `共 ${subTrades.length} 筆`;
+      document.getElementById('btClosedCnt').textContent = `${closed.length} 筆平倉`;
+      document.getElementById('btMdd').textContent = `${mdd.toFixed(2)}%`;
+      document.getElementById('btOpenRem').textContent = `當日持股 ${snap.length} 檔`;
+
+      // 持股快照
+      document.getElementById('btSnapDate').textContent = cutoffDate;
+      document.getElementById('btSnapTone').textContent = pt.mktTone || '震盪整理';
+      document.getElementById('btHoldingsSnapshot').innerHTML = snap.length === 0
+        ? `<div style="font-size:12px; color:#64748b;">截至 ${cutoffDate} 空手觀察中（現金 $${Number(pt.cash || 100000).toLocaleString()}）。</div>`
+        : snap.map(h => `
+          <div style="padding:9px; border-radius:10px; background:#f8fafc; border:1px solid #e2e8f0; margin-bottom:7px;">
+            <div style="display:flex; justify-content:space-between; font-weight:800; font-size:13px;">
+              <span>${h.name} ${h.code} (批${h.stage})</span>
+              <span class="${h.pnlPct >= 0 ? 'up' : 'down'}">${h.pnlPct >= 0 ? '+' : ''}${h.pnlPct}%</span>
+            </div>
+            <div style="font-size:11px; color:#475569; margin-top:3px;">${h.shares}股｜均價 ${h.avgCost}｜收盤 ${h.curPrice}｜停損 ${h.stopLoss}｜持有 ${h.daysHeld}天</div>
+          </div>
+        `).join('') + `<div style="font-size:11px; color:#64748b; margin-top:6px;">當日剩餘現金：$${Number(pt.cash || 0).toLocaleString()}</div>`;
+
+      // 截至該日明細
+      document.getElementById('btTradesBody').innerHTML = subTrades.length === 0
+        ? `<tr><td colspan="8" style="text-align:center; color:#64748b;">截至 ${cutoffDate} 尚無觸發交易</td></tr>`
+        : subTrades.map(t => {
             const cost = Number(t.fee || 0) + Number(t.tax || 0);
             const pnl = t.side === 'SELL' ? Number(t.netPnL || 0) : null;
             return `
@@ -1096,8 +1196,7 @@
           }).join('');
 
       const container = document.getElementById('btChartContainer');
-      const curve = bt.equityCurve || [];
-      if (container && window.LightweightCharts && curve.length > 0) {
+      if (container && window.LightweightCharts && subCurve.length > 0) {
         container.innerHTML = '';
         const chart = LightweightCharts.createChart(container, {
           layout: { background: { color: '#0f1219' }, textColor: '#cbd5e1' },
@@ -1107,9 +1206,9 @@
           timeScale: { borderColor: 'rgba(148,163,184,0.2)' }
         });
         const l1 = chart.addLineSeries({ color: '#ef4444', lineWidth: 2.5, title: '回測%' });
-        l1.setData(curve.map(x => ({ time: x.date, value: x.botReturnPct })));
+        l1.setData(subCurve.map(x => ({ time: x.date, value: x.botReturnPct })));
         const l2 = chart.addLineSeries({ color: '#3b82f6', lineWidth: 2, title: '大盤%' });
-        l2.setData(curve.map(x => ({ time: x.date, value: x.twiiReturnPct })));
+        l2.setData(subCurve.map(x => ({ time: x.date, value: x.twiiReturnPct })));
         chart.timeScale().fitContent();
       }
     }

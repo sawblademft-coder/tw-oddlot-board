@@ -1647,8 +1647,8 @@ function getAutoBotDashboardData(ss) {
 
 // ==================== 14. 近三個月歷史回測引擎 (純記憶體運算，不寫入試算表) ====================
 function runThreeMonthBacktest(ss, params) {
-  const months = Number(params.months || 3);
-  const targetDays = months >= 6 ? 130 : 65;
+  const months = Number(params.months || 2);
+  const targetDays = months >= 6 ? 130 : (months >= 3 ? 65 : 44);
   const maxUpStreak = Number(params.maxUpStreak || 2);
   const triggerMode = String(params.triggerMode || 'STRICT'); // 'STRICT' | 'RELAXED'
   const maxHoldings = Number(params.maxHoldings || 4);
@@ -1683,7 +1683,7 @@ function runThreeMonthBacktest(ss, params) {
   if (sortedAllDates.length < 70) {
     return { error: '歷史資料天數不足（需至少 70 個交易日才能進行回測），請先確認 Batch1~4 已執行 2y 載入。' };
   }
-  const actualDays = Math.min(targetDays, Math.max(60, sortedAllDates.length - 62));
+  const actualDays = Math.min(targetDays, Math.max(40, sortedAllDates.length - 62));
   const btDates = sortedAllDates.slice(-actualDays);
   const btStartDate = btDates[0];
 
@@ -1891,15 +1891,18 @@ function runThreeMonthBacktest(ss, params) {
       }
     }
 
-    // 結算當日淨值
+    // 結算當日淨值與當日持股快照
     let mv = 0;
-    Object.values(openPos).forEach(p => {
-      mv += Math.round(p.shares * (todayCloses[p.code] || p.avgCost));
+    const holdingsSnapshot = Object.values(openPos).map(p => {
+      const curPrice = todayCloses[p.code] || p.avgCost;
+      mv += Math.round(p.shares * curPrice);
+      const pnlPct = Number((((curPrice - p.avgCost) / p.avgCost) * 100).toFixed(2));
+      return { code: p.code, name: p.name, stage: p.stage, shares: p.shares, avgCost: p.avgCost, curPrice, stopLoss: p.stopLoss, daysHeld: p.daysHeld, pnlPct };
     });
     const equity = Math.round(cash + mv);
     const botRet = Number((((equity - INIT_CAP) / INIT_CAP) * 100).toFixed(2));
     const twiiRet = Number((((twiiClose - startTwiiClose) / startTwiiClose) * 100).toFixed(2));
-    equityCurve.push({ date: dateStr, equity, cash: Math.round(cash), botReturnPct: botRet, twiiReturnPct: twiiRet });
+    equityCurve.push({ date: dateStr, mktTone, equity, cash: Math.round(cash), botReturnPct: botRet, twiiReturnPct: twiiRet, holdingsSnapshot });
   });
 
   // 4. 彙整回測統計指標
