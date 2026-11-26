@@ -1647,6 +1647,8 @@ function getAutoBotDashboardData(ss) {
 
 // ==================== 14. 近三個月歷史回測引擎 (純記憶體運算，不寫入試算表) ====================
 function runThreeMonthBacktest(ss, params) {
+  const months = Number(params.months || 3);
+  const targetDays = months >= 6 ? 130 : 65;
   const maxUpStreak = Number(params.maxUpStreak || 2);
   const triggerMode = String(params.triggerMode || 'STRICT'); // 'STRICT' | 'RELAXED'
   const maxHoldings = Number(params.maxHoldings || 4);
@@ -1679,9 +1681,10 @@ function runThreeMonthBacktest(ss, params) {
 
   const sortedAllDates = Array.from(allDatesSet).sort();
   if (sortedAllDates.length < 70) {
-    return { error: '歷史資料天數不足（需至少 70 個交易日才能進行 3 個月回測），請先確認 Batch1~4 已執行 2y 載入。' };
+    return { error: '歷史資料天數不足（需至少 70 個交易日才能進行回測），請先確認 Batch1~4 已執行 2y 載入。' };
   }
-  const btDates = sortedAllDates.slice(-65); // 近 65 個交易日 (約 3 個月)
+  const actualDays = Math.min(targetDays, Math.max(60, sortedAllDates.length - 62));
+  const btDates = sortedAllDates.slice(-actualDays);
   const btStartDate = btDates[0];
 
   // 將每檔股票轉為依日期升序陣列與日期索引 Map
@@ -1695,8 +1698,8 @@ function runThreeMonthBacktest(ss, params) {
     stockDateIdx[c] = idxMap;
   });
 
-  // 2. 取得大盤歷史 (^TWII 6mo)
-  const twiiBars = fetchYahooHistory('^TWII', '6mo');
+  // 2. 取得大盤歷史 (^TWII 1y 以覆蓋 6 個月以上)
+  const twiiBars = fetchYahooHistory('^TWII', '1y');
   const twiiByDate = {};
   twiiBars.forEach(b => { twiiByDate[b.date] = b; });
   const twiiSorted = Object.values(twiiByDate).sort((a, b) => a.date.localeCompare(b.date));

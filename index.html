@@ -249,7 +249,7 @@
       <button onclick="switchTab('tab-journal')">持股與日誌</button>
       <button onclick="switchTab('tab-stats')">100檔滾動統計</button>
       <button onclick="switchTab('tab-autobot')">🤖 自動模擬</button>
-      <button onclick="switchTab('tab-backtest')">🧪 3個月回測</button>
+      <button onclick="switchTab('tab-backtest')">🧪 歷史回測</button>
       <button onclick="switchTab('tab-sop')">操作流程SOP</button>
     </nav>
 
@@ -607,10 +607,17 @@
     <section id="tab-backtest" class="tab-pane">
       <div class="card-light" style="margin-bottom:14px;">
         <div class="card-title-row" style="flex-wrap:wrap;">
-          <div class="card-title">🧪 近 3 個月歷史回測（以過去 65 個交易日真實 K 線驗證）</div>
+          <div class="card-title">🧪 歷史回測（以過去 3～6 個月真實 K 線驗證）</div>
           <span class="badge badge-light-warn">純記憶體運算・不影響正式帳戶</span>
         </div>
-        <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:10px; align-items:end;">
+        <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(160px, 1fr)); gap:10px; align-items:end;">
+          <div class="field">
+            <label>回測區間</label>
+            <select id="btMonths">
+              <option value="3">近 3 個月 (65 交易日)</option>
+              <option value="6" selected>近 6 個月 (130 交易日)</option>
+            </select>
+          </div>
           <div class="field">
             <label>連漲過熱排除門檻</label>
             <select id="btMaxStreak">
@@ -634,21 +641,21 @@
               <option value="6">最多 6 檔 (單檔上限 16%)</option>
             </select>
           </div>
-          <button class="btn-primary" id="btRunBtn" onclick="executeBacktest()">🚀 執行近 3 個月回測</button>
+          <button class="btn-primary" id="btRunBtn" onclick="executeBacktest()">🚀 執行歷史回測</button>
         </div>
       </div>
 
       <div id="btResultArea" class="hidden">
         <div class="widget-grid">
           <div class="widget w-blue">
-            <div class="w-head"><span>💰 3個月期末淨值</span><span id="btRange">-</span></div>
+            <div class="w-head"><span>💰 回測期末淨值</span><span id="btRange">-</span></div>
             <div class="w-val" id="btFinalEq">$100,000</div>
             <div class="w-foot"><span id="btTotalRet">+0.00%</span><span>起始 $100,000</span></div>
           </div>
           <div class="widget w-red" id="btAlphaBox">
             <div class="w-head"><span>📊 對比同期大盤</span><span>Alpha</span></div>
             <div class="w-val" id="btAlpha">+0.00%</div>
-            <div class="w-foot"><span id="btTwiiRet">大盤 +0.00%</span><span>65交易日</span></div>
+            <div class="w-foot"><span id="btTwiiRet">大盤 +0.00%</span><span id="btDaysLabel">-</span></div>
           </div>
           <div class="widget w-black">
             <div class="w-head"><span>🎯 勝率 ＆ 賺賠比</span><span id="btTradeStats">0筆</span></div>
@@ -1007,6 +1014,7 @@
     async function executeBacktest() {
       const btn = document.getElementById('btRunBtn');
       const params = {
+        months: Number(document.getElementById('btMonths').value),
         maxUpStreak: Number(document.getElementById('btMaxStreak').value),
         triggerMode: document.getElementById('btTriggerMode').value,
         maxHoldings: Number(document.getElementById('btMaxHold').value)
@@ -1031,7 +1039,7 @@
         return;
       }
 
-      btn.textContent = '⏳ 運算近65天K線中...'; btn.disabled = true;
+      btn.textContent = `⏳ 運算近${params.months}個月K線中...`; btn.disabled = true;
       try {
         const res = await fetch(APP.gasUrl, {
           method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' },
@@ -1046,7 +1054,7 @@
       } catch (e) {
         alert('回測連線失敗：' + e.message);
       } finally {
-        btn.textContent = '🚀 執行近 3 個月回測'; btn.disabled = false;
+        btn.textContent = '🚀 執行歷史回測'; btn.disabled = false;
       }
     }
 
@@ -1058,6 +1066,7 @@
 
       document.getElementById('btAlpha').textContent = `${bt.alpha >= 0 ? '+' : ''}${bt.alpha}%`;
       document.getElementById('btTwiiRet').textContent = `大盤 ${bt.twiiReturnPct >= 0 ? '+' : ''}${bt.twiiReturnPct}%`;
+      document.getElementById('btDaysLabel').textContent = `${bt.daysCount || 65}交易日`;
       document.getElementById('btAlphaBox').className = 'widget ' + (bt.alpha >= 0 ? 'w-red' : 'w-green');
 
       document.getElementById('btWinRate').textContent = bt.winRate === null ? '- %' : `${bt.winRate}%`;
