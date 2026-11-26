@@ -910,6 +910,11 @@ function doPost(e) {
       return jsonResponse({ ok: true });
     }
 
+    if (action === 'runBacktest') {
+      const bt = runThreeMonthBacktest(ss, body.params || {});
+      return jsonResponse({ ok: true, backtest: bt });
+    }
+
     return jsonResponse({ ok: false, error: 'UNKNOWN_ACTION' });
   } catch (err) {
     return jsonResponse({ ok: false, error: err.message });
@@ -1636,5 +1641,294 @@ function getAutoBotDashboardData(ss) {
     cash: cfg.AUTO_BOT_CASH !== undefined && cfg.AUTO_BOT_CASH !== '' ? Number(cfg.AUTO_BOT_CASH) : 100000,
     equityCurve: eqSheet ? getSheetObjects(ss, SHEET_NAMES.AUTO_EQUITY) : [],
     trades: trSheet ? getSheetObjects(ss, SHEET_NAMES.AUTO_TRADES).slice(-100).reverse() : []
+  };
+}
+
+
+// ==================== 14. 近三個月歷史回測引擎 (純記憶體運算，不寫入試算表) ====================
+function runThreeMonthBacktest(ss, params) {
+  const maxUpStreak = Number(params.maxUpStreak || 2);
+  const triggerMode = String(params.triggerMode || 'STRICT'); // 'STRICT' | 'RELAXED'
+  const maxHoldings = Number(params.maxHoldings || 4);
+  const maxSinglePct = maxHoldings >= 6 ? 0.16 : 0.24;
+  const INIT_CAP = 100000;
+  const RISK_PCT = 0.01;
+
+  // 1. 讀取 Watchlist & History_Cache
+  const wlRows = ss.getSheetByName(SHEET_NAMES.WATCHLIST).getDataRange().getValues().slice(1);
+  const activeMeta = {};
+  wlRows.forEach(w => {
+    const code = normCode(w[0]);
+    const active = w[6] !== false && String(w[6]).toUpperCase() !== 'FALSE';
+    if (code && active) activeMeta[code] = { name: String(w[1]).trim(), c02Status: String(w[4]).trim() || '穩健' };
+  });
+
+  const histRows = ss.getSheetByName(SHEET_NAMES.HISTORY).getDataRange().getValues().slice(1);
+  const byCode = {};
+  const allDatesSet = new Set();
+  histRows.forEach(r => {
+    const c = normCode(r[1]);
+    const dStr = formatDateVal(r[0]);
+    if (!c || !dStr || !activeMeta[c]) return;
+    allDatesSet.add(dStr);
+    if (!byCode[c]) byCode[c] = {};
+    byCode[c][dStr] = {
+      date: dStr, open: Number(r[2]), high: Number(r[3]), low: Number(r[4]), close: Number(r[5]), volume: Number(r[6])
+    };
+  });
+
+  const sortedAllDates = Array.from(allDatesSet).sort();
+  if (sortedAllDates.length < 70) {
+    return { error: '歷史資料天數不足（需至少 70 個交易日才能進行 3 個月回測），請先確認 Batch1~4 已執行 2y 載入。' };
+  }
+  const btDates = sortedAllDates.slice(-65); // 近 65 個交易日 (約 3 個月)
+  const btStartDate = btDates[0];
+
+  // 將每檔股票轉為依日期升序陣列與日期索引 Map
+  const stockSeries = {};
+  const stockDateIdx = {};
+  Object.keys(byCode).forEach(c => {
+    const arr = Object.values(byCode[c]).sort((a, b) => a.date.localeCompare(b.date));
+    stockSeries[c] = arr;
+    const idxMap = {};
+    arr.forEach((b, i) => { idxMap[b.date] = i; });
+    stockDateIdx[c] = idxMap;
+  });
+
+  // 2. 取得大盤歷史 (^TWII 6mo)
+  const twiiBars = fetchYahooHistory('^TWII', '6mo');
+  const twiiByDate = {};
+  twiiBars.forEach(b => { twiiByDate[b.date] = b; });
+  const twiiSorted = Object.values(twiiByDate).sort((a, b) => a.date.localeCompare(b.date));
+  const twiiIdxMap = {};
+  twiiSorted.forEach((b, i) => { twiiIdxMap[b.date] = i; });
+  const startTwiiClose = (twiiByDate[btStartDate] && twiiByDate[btStartDate].close) || (twiiSorted.length > 0 ? twiiSorted[0].close : 1);
+
+  // 3. 逐日回測模擬
+  let cash = INIT_CAP;
+  const openPos = {}; // code -> { code, name, stage, shares, avgCost, stopLoss, entryDate, daysHeld }
+  const equityCurve = [];
+  const trades = [];
+
+  btDates.forEach(dateStr => {
+    // 大盤當日定調
+    const ti = twiiIdxMap[dateStr];
+    let mktChg = 0, mktRet5 = 0, mktTone = '震盪整理', twiiClose = startTwiiClose;
+    if (ti !== undefined && ti >= 1) {
+      twiiClose = twiiSorted[ti].close;
+      const prevTwii = twiiSorted[ti - 1].close;
+      mktChg = prevTwii > 0 ? ((twiiClose - prevTwii) / prevTwii) * 100 : 0;
+      const prev5 = ti >= 5 ? twiiSorted[ti - 5].close : prevTwii;
+      mktRet5 = prev5 > 0 ? ((twiiClose - prev5) / prev5) * 100 : mktChg;
+      const mSma5 = calcSMA(twiiSorted, 5, ti);
+      const mSma20 = calcSMA(twiiSorted, 20, ti);
+      const mSma60 = calcSMA(twiiSorted, 60, ti);
+      if (twiiClose > mSma5 && twiiClose > mSma20 && mSma20 > mSma60) mktTone = '偏多格局';
+      else if (twiiClose < mSma20 && mktChg <= -1.5) mktTone = '空頭警戒';
+    }
+
+    const dayCandidates = [];
+    const todayCloses = {};
+
+    // 掃描所有股票截至 dateStr 的技術面
+    Object.keys(stockSeries).forEach(code => {
+      const idx = stockDateIdx[code][dateStr];
+      if (idx === undefined || idx < 61) return;
+      const series = stockSeries[code].slice(0, idx + 1);
+      const n = series.length;
+      const today = series[n - 1];
+      const prev = series[n - 2];
+      todayCloses[code] = today.close;
+
+      const changePct = prev.close > 0 ? ((today.close - prev.close) / prev.close) * 100 : 0;
+      const ret5 = series[n - 6] && series[n - 6].close > 0 ? ((today.close - series[n - 6].close) / series[n - 6].close) * 100 : changePct;
+      const sma5 = calcSMA(series, 5, n - 1);
+      const sma5Prev = calcSMA(series, 5, n - 2);
+      const sma10 = calcSMA(series, 10, n - 1);
+      const sma20 = calcSMA(series, 20, n - 1);
+      const sma20Prev = calcSMA(series, 20, n - 2);
+      const sma60 = calcSMA(series, 60, n - 1);
+      const sma60Prev = calcSMA(series, 60, n - 2);
+
+      let upStreak = 0;
+      for (let k = n - 1; k > 0; k--) {
+        if (series[k].close > series[k - 1].close) upStreak++;
+        else break;
+      }
+
+      const c08 = today.volume > 1000;
+      const c09 = today.close > sma20 && today.close > sma60 && sma20 >= sma20Prev && sma60 >= sma60Prev;
+      const c01 = changePct >= mktChg && ret5 >= mktRet5;
+
+      const prevMaxMa = Math.max(calcSMA(series, 5, n - 4), calcSMA(series, 10, n - 4), calcSMA(series, 20, n - 4), calcSMA(series, 60, n - 4));
+      const prevMinMa = Math.min(calcSMA(series, 5, n - 4), calcSMA(series, 10, n - 4), calcSMA(series, 20, n - 4), calcSMA(series, 60, n - 4));
+      const squeezeSpread = prevMinMa > 0 ? ((prevMaxMa - prevMinMa) / prevMinMa) * 100 : 99;
+      const avgVol5 = calcAvgVol(series, 5, n - 2);
+      const c04 = squeezeSpread <= 3.0 && today.close > today.open && today.close > Math.max(sma5, sma10, sma20, sma60) && today.volume > avgVol5 * 1.2;
+
+      const kd = calcKD(series);
+      const c05 = kd.prevK <= kd.prevD && kd.k > kd.d && kd.k <= 60 && kd.d <= 60;
+      const macd = calcMACD(series);
+      const c06 = (macd.prevHist <= 0 && macd.hist > 0) || (macd.hist > 0 && macd.hist > macd.prevHist);
+
+      const body = Math.abs(today.close - today.open);
+      const upperShadow = today.high - Math.max(today.close, today.open);
+      const bodyMid = (today.open + today.close) / 2;
+      const isHalfBodyUp = today.close > today.open && bodyMid >= sma5 && today.close > sma5 && sma5 >= sma5Prev;
+      const isHalfBodyDown = today.close < today.open && bodyMid <= sma5 && today.close < sma5 && sma5 <= sma5Prev;
+      const isBirdBeak = sma5Prev <= sma20Prev * 1.015 && sma5 > sma5Prev && today.low >= sma20 * 0.985 && today.close > sma5;
+      const isBullEngulfing = prev.close < prev.open && today.close > today.open && today.open <= prev.close && today.close >= prev.open;
+      const prev2 = series[n - 3];
+      const isMorningStar = prev2 && prev2.close < prev2.open && Math.abs(prev.close - prev.open) < Math.abs(prev2.close - prev2.open) * 0.4 && today.close > today.open && today.close > (prev2.open + prev2.close) / 2;
+      const isHighUpperShadow = upperShadow > body * 1.8 && today.volume > avgVol5 * 1.5;
+
+      // 檢查目前持倉出場與加碼
+      if (openPos[code]) {
+        const pos = openPos[code];
+        pos.daysHeld++;
+        const pnlPct = ((today.close - pos.avgCost) / pos.avgCost) * 100;
+        let sellShares = 0, sellReason = '';
+
+        if (today.close <= pos.stopLoss || today.close < sma20 * 0.995) {
+          sellShares = pos.shares;
+          sellReason = `硬停損 (${today.close}<=${pos.stopLoss})`;
+        } else if (pnlPct >= 15 && pos.shares >= 3) {
+          sellShares = Math.max(1, Math.floor(pos.shares / 3));
+          sellReason = `移動停利一 (+${pnlPct.toFixed(1)}%賣1/3)`;
+        } else if (isHalfBodyDown && pos.shares >= 2) {
+          sellShares = Math.max(1, Math.floor(pos.shares / 2));
+          sellReason = `移動停利二 (反下半身減碼)`;
+        } else if (pos.daysHeld >= 5 && Math.abs(pnlPct) < 2.5 && Math.abs(sma5 - sma5Prev) / Math.max(1, sma5) < 0.002 && macd.hist < macd.prevHist) {
+          sellShares = Math.max(1, Math.floor(pos.shares / 2));
+          sellReason = `時間停損 (${pos.daysHeld}日橫盤減半)`;
+        }
+
+        if (sellShares > 0) {
+          const amount = Math.round(sellShares * today.close);
+          const fee = calcBotFee(amount);
+          const tax = calcBotTax(code, amount);
+          const netProceeds = amount - fee - tax;
+          const buyFeeEst = calcBotFee(Math.round(sellShares * pos.avgCost));
+          const netPnL = Math.round(netProceeds - (sellShares * pos.avgCost) - buyFeeEst);
+          cash += netProceeds;
+          pos.shares -= sellShares;
+          trades.push({ date: dateStr, code, name: pos.name, side: 'SELL', stage: pos.stage, shares: sellShares, price: today.close, fee, tax, netPnL, reason: sellReason });
+          if (pos.shares <= 0) delete openPos[code];
+          else pos.stopLoss = Math.max(pos.stopLoss, pos.avgCost);
+        } else if (pos.stage < 3 && cash >= INIT_CAP * 0.30) {
+          const canAdd2 = pos.stage === 1 && pnlPct >= 4 && today.close > sma5 && sma5 > sma5Prev;
+          const canAdd3 = pos.stage === 2 && pnlPct >= 8 && today.close > sma5;
+          if (canAdd2 || canAdd3) {
+            const execPrice = roundToTick(today.close + getTickSize(today.close));
+            const addShares = Math.floor(((INIT_CAP * maxSinglePct) / 3) / execPrice);
+            const amount = Math.round(addShares * execPrice);
+            const fee = calcBotFee(amount);
+            if (addShares >= 1 && (cash - amount - fee) >= INIT_CAP * 0.30) {
+              cash -= (amount + fee);
+              const newShares = pos.shares + addShares;
+              pos.avgCost = Number((((pos.shares * pos.avgCost) + amount) / newShares).toFixed(2));
+              pos.shares = newShares;
+              pos.stage++;
+              const newStop = pos.stage === 3 ? pos.avgCost : roundToTick(pos.avgCost * 0.95);
+              pos.stopLoss = Math.max(pos.stopLoss, newStop);
+              trades.push({ date: dateStr, code, name: pos.name, side: 'BUY', stage: pos.stage, shares: addShares, price: execPrice, fee, tax: 0, netPnL: 0, reason: `第${pos.stage}批加碼(+${pnlPct.toFixed(1)}%)` });
+            }
+          }
+        }
+        return;
+      }
+
+      // 評估新進場候選
+      const hasResonance = c04 || isHalfBodyUp || isBirdBeak || isBullEngulfing || isMorningStar;
+      const hasMomentum = triggerMode === 'RELAXED' && (c05 || c06);
+      const isExcluded = (upStreak >= maxUpStreak) || isHighUpperShadow;
+
+      if (c08 && c09 && c01 && !isExcluded && (hasResonance || hasMomentum)) {
+        let score = 3;
+        const reasons = ['C01/C08/C09'];
+        if (c04) { score++; reasons.push('均線發散'); }
+        if (isHalfBodyUp) { score++; reasons.push('下半身'); }
+        if (isBirdBeak) { score++; reasons.push('鳥嘴'); }
+        if (isBullEngulfing || isMorningStar) { score++; reasons.push('酒田反轉'); }
+        if (c05) { score++; reasons.push('KD金叉'); }
+        if (c06) { score++; reasons.push('MACD向上'); }
+
+        const recentLow = Math.min(...series.slice(Math.max(0, n - 10), n).map(x => x.low));
+        const stopLoss = roundToTick(Math.min(today.close * 0.94, Math.max(today.close * 0.92, Math.max(recentLow, sma20 * 0.99))));
+        const limitPrice = roundToTick(today.close + getTickSize(today.close));
+        const maxByRisk = Math.floor((INIT_CAP * RISK_PCT) / Math.max(1, limitPrice - stopLoss));
+        const maxByCap = Math.floor(((INIT_CAP * maxSinglePct) / 3) / limitPrice);
+        const recShares = Math.max(0, Math.min(maxByRisk, maxByCap));
+
+        if (recShares >= 1) {
+          dayCandidates.push({
+            code, name: activeMeta[code].name, score, c02: activeMeta[code].c02Status === '穩健' ? 1 : 0,
+            volume: today.volume, recShares, limitPrice, stopLoss, reason: reasons.join('+')
+          });
+        }
+      }
+    });
+
+    // 執行當日新進場
+    const minCashKeep = mktTone === '空頭警戒' ? INIT_CAP * 0.50 : INIT_CAP * 0.30;
+    const heldCnt = Object.keys(openPos).length;
+    if (mktTone !== '空頭警戒' && heldCnt < maxHoldings && cash > minCashKeep) {
+      dayCandidates.sort((a, b) => (b.score - a.score) || (b.c02 - a.c02) || (b.volume - a.volume));
+      let slots = maxHoldings - heldCnt;
+      for (let i = 0; i < dayCandidates.length && slots > 0; i++) {
+        const c = dayCandidates[i];
+        const amount = Math.round(c.recShares * c.limitPrice);
+        const fee = calcBotFee(amount);
+        if ((cash - amount - fee) >= minCashKeep) {
+          cash -= (amount + fee);
+          openPos[c.code] = { code: c.code, name: c.name, stage: 1, shares: c.recShares, avgCost: c.limitPrice, stopLoss: c.stopLoss, entryDate: dateStr, daysHeld: 0 };
+          trades.push({ date: dateStr, code: c.code, name: c.name, side: 'BUY', stage: 1, shares: c.recShares, price: c.limitPrice, fee, tax: 0, netPnL: 0, reason: `第1批試單：${c.reason}` });
+          slots--;
+        }
+      }
+    }
+
+    // 結算當日淨值
+    let mv = 0;
+    Object.values(openPos).forEach(p => {
+      mv += Math.round(p.shares * (todayCloses[p.code] || p.avgCost));
+    });
+    const equity = Math.round(cash + mv);
+    const botRet = Number((((equity - INIT_CAP) / INIT_CAP) * 100).toFixed(2));
+    const twiiRet = Number((((twiiClose - startTwiiClose) / startTwiiClose) * 100).toFixed(2));
+    equityCurve.push({ date: dateStr, equity, cash: Math.round(cash), botReturnPct: botRet, twiiReturnPct: twiiRet });
+  });
+
+  // 4. 彙整回測統計指標
+  const lastEq = equityCurve[equityCurve.length - 1] || { equity: INIT_CAP, botReturnPct: 0, twiiReturnPct: 0 };
+  const closed = trades.filter(t => t.side === 'SELL');
+  const wins = closed.filter(t => t.netPnL > 0);
+  const losses = closed.filter(t => t.netPnL < 0);
+  const sumWin = wins.reduce((a, b) => a + b.netPnL, 0);
+  const sumLoss = Math.abs(losses.reduce((a, b) => a + b.netPnL, 0));
+
+  let peak = INIT_CAP, mdd = 0;
+  equityCurve.forEach(e => {
+    if (e.equity > peak) peak = e.equity;
+    const dd = ((e.equity - peak) / peak) * 100;
+    if (dd < mdd) mdd = dd;
+  });
+
+  return {
+    startDate: btDates[0],
+    endDate: btDates[btDates.length - 1],
+    daysCount: btDates.length,
+    finalEquity: lastEq.equity,
+    totalReturnPct: lastEq.botReturnPct,
+    twiiReturnPct: lastEq.twiiReturnPct,
+    alpha: Number((lastEq.botReturnPct - lastEq.twiiReturnPct).toFixed(2)),
+    winRate: closed.length > 0 ? Number(((wins.length / closed.length) * 100).toFixed(1)) : null,
+    profitFactor: sumLoss > 0 ? Number((sumWin / sumLoss).toFixed(2)) : (sumWin > 0 ? '∞' : '-'),
+    mdd: Number(mdd.toFixed(2)),
+    totalTrades: trades.length,
+    closedTrades: closed.length,
+    openRemaining: Object.keys(openPos).length,
+    equityCurve,
+    trades: trades.slice().reverse()
   };
 }

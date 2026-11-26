@@ -213,12 +213,12 @@
       position: fixed; bottom: 0; left: 0; right: 0; z-index: 45;
       background: rgba(255, 255, 255, 0.9); backdrop-filter: blur(18px);
       border-top: 1px solid rgba(203, 213, 225, 0.7);
-      display: grid; grid-template-columns: repeat(6, 1fr); padding: 6px 2px 10px;
+      display: grid; grid-template-columns: repeat(7, 1fr); padding: 6px 2px 10px;
     }
     .bottom-nav button {
-      border: none; background: transparent; padding: 5px 2px;
+      border: none; background: transparent; padding: 5px 1px;
       display: flex; flex-direction: column; align-items: center; gap: 3px;
-      font-size: 11px; font-weight: 700; color: #64748b; cursor: pointer;
+      font-size: 10px; font-weight: 700; color: #64748b; cursor: pointer;
     }
     .bottom-nav button.active { color: #1d4ed8; }
 
@@ -249,6 +249,7 @@
       <button onclick="switchTab('tab-journal')">持股與日誌</button>
       <button onclick="switchTab('tab-stats')">100檔滾動統計</button>
       <button onclick="switchTab('tab-autobot')">🤖 自動模擬</button>
+      <button onclick="switchTab('tab-backtest')">🧪 3個月回測</button>
       <button onclick="switchTab('tab-sop')">操作流程SOP</button>
     </nav>
 
@@ -602,14 +603,95 @@
       </div>
     </section>
 
+    <!-- ==================== 分頁 7：近三個月歷史回測 ==================== -->
+    <section id="tab-backtest" class="tab-pane">
+      <div class="card-light" style="margin-bottom:14px;">
+        <div class="card-title-row" style="flex-wrap:wrap;">
+          <div class="card-title">🧪 近 3 個月歷史回測（以過去 65 個交易日真實 K 線驗證）</div>
+          <span class="badge badge-light-warn">純記憶體運算・不影響正式帳戶</span>
+        </div>
+        <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:10px; align-items:end;">
+          <div class="field">
+            <label>連漲過熱排除門檻</label>
+            <select id="btMaxStreak">
+              <option value="2">連漲 &gt;= 2 根排除 (目前設定)</option>
+              <option value="5">連漲 &gt;= 5 根排除 (建議平衡)</option>
+              <option value="8">連漲 &gt;= 8 根排除 (原手冊九日法則)</option>
+              <option value="99">不排除連漲</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>買點觸發模式</label>
+            <select id="btTriggerMode">
+              <option value="STRICT">嚴格共振 (C04/下半身/鳥嘴/吞噬/晨星)</option>
+              <option value="RELAXED">放寬動能 (含 KD中低檔金叉 / MACD向上)</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>同時持股上限</label>
+            <select id="btMaxHold">
+              <option value="4">最多 4 檔 (單檔上限 24%)</option>
+              <option value="6">最多 6 檔 (單檔上限 16%)</option>
+            </select>
+          </div>
+          <button class="btn-primary" id="btRunBtn" onclick="executeBacktest()">🚀 執行近 3 個月回測</button>
+        </div>
+      </div>
+
+      <div id="btResultArea" class="hidden">
+        <div class="widget-grid">
+          <div class="widget w-blue">
+            <div class="w-head"><span>💰 3個月期末淨值</span><span id="btRange">-</span></div>
+            <div class="w-val" id="btFinalEq">$100,000</div>
+            <div class="w-foot"><span id="btTotalRet">+0.00%</span><span>起始 $100,000</span></div>
+          </div>
+          <div class="widget w-red" id="btAlphaBox">
+            <div class="w-head"><span>📊 對比同期大盤</span><span>Alpha</span></div>
+            <div class="w-val" id="btAlpha">+0.00%</div>
+            <div class="w-foot"><span id="btTwiiRet">大盤 +0.00%</span><span>65交易日</span></div>
+          </div>
+          <div class="widget w-black">
+            <div class="w-head"><span>🎯 勝率 ＆ 賺賠比</span><span id="btTradeStats">0筆</span></div>
+            <div class="w-val" id="btWinRate">- %</div>
+            <div class="w-foot"><span id="btPf">賺賠比 -</span><span id="btClosedCnt">0 筆平倉</span></div>
+          </div>
+          <div class="widget w-amber">
+            <div class="w-head"><span>📉 最大回撤 (MDD)</span><span>風險評估</span></div>
+            <div class="w-val" id="btMdd">0.00%</div>
+            <div class="w-foot"><span id="btOpenRem">期末尚持 0 檔</span><span>含手續費與稅</span></div>
+          </div>
+        </div>
+
+        <div class="card-dark" style="margin-bottom:14px;">
+          <div class="card-title-row">
+            <div class="card-title">📈 回測淨值報酬率 vs 同期大盤 (紅線:回測策略 / 藍線:加權指數)</div>
+          </div>
+          <div id="btChartContainer" style="width:100%; height:260px;"></div>
+        </div>
+
+        <div class="card-light">
+          <div class="card-title-row">
+            <div class="card-title">🧾 回測歷史買賣明細（依時間倒序）</div>
+          </div>
+          <div class="table-wrap" style="max-height:380px; overflow-y:auto;">
+            <table>
+              <thead><tr><th>日期</th><th>標的</th><th>動作</th><th>股數</th><th>價格</th><th>稅費</th><th>淨損益</th><th>觸發原因</th></tr></thead>
+              <tbody id="btTradesBody"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </section>
+
   </main>
 
   <nav class="bottom-nav" id="mobileNav">
-    <button class="active" onclick="switchTab('tab-today')"><span>📊</span><span>戰情室</span></button>
+    <button class="active" onclick="switchTab('tab-today')"><span>📊</span><span>戰情</span></button>
     <button onclick="switchTab('tab-check')"><span>✅</span><span>檢核</span></button>
     <button onclick="switchTab('tab-journal')"><span>📒</span><span>日誌</span></button>
     <button onclick="switchTab('tab-stats')"><span>📈</span><span>統計</span></button>
     <button onclick="switchTab('tab-autobot')"><span>🤖</span><span>自動</span></button>
+    <button onclick="switchTab('tab-backtest')"><span>🧪</span><span>回測</span></button>
     <button onclick="switchTab('tab-sop')"><span>🧭</span><span>SOP</span></button>
   </nav>
 
@@ -739,7 +821,7 @@
       document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
       document.getElementById(tabId).classList.add('active');
       document.querySelectorAll('#desktopNav button, #mobileNav button').forEach(b => b.classList.remove('active'));
-      const idx = ['tab-today', 'tab-check', 'tab-journal', 'tab-stats', 'tab-autobot', 'tab-sop'].indexOf(tabId);
+      const idx = ['tab-today', 'tab-check', 'tab-journal', 'tab-stats', 'tab-autobot', 'tab-backtest', 'tab-sop'].indexOf(tabId);
       const dBtns = document.querySelectorAll('#desktopNav button');
       const mBtns = document.querySelectorAll('#mobileNav button');
       if (dBtns[idx]) dBtns[idx].classList.add('active');
@@ -920,6 +1002,107 @@
       });
       alert('已重置自動模擬操盤實驗！');
       fetchDashboardData();
+    }
+
+    async function executeBacktest() {
+      const btn = document.getElementById('btRunBtn');
+      const params = {
+        maxUpStreak: Number(document.getElementById('btMaxStreak').value),
+        triggerMode: document.getElementById('btTriggerMode').value,
+        maxHoldings: Number(document.getElementById('btMaxHold').value)
+      };
+
+      if (APP.isDemo) {
+        renderBacktestResult({
+          startDate: '2026-08-25', endDate: '2026-11-25', daysCount: 65,
+          finalEquity: 104250, totalReturnPct: 4.25, twiiReturnPct: 1.80, alpha: 2.45,
+          winRate: 62.5, profitFactor: 1.85, mdd: -2.10, totalTrades: 14, closedTrades: 8, openRemaining: 2,
+          equityCurve: [
+            { date: '2026-08-25', botReturnPct: 0, twiiReturnPct: 0 },
+            { date: '2026-09-15', botReturnPct: 1.4, twiiReturnPct: -0.8 },
+            { date: '2026-10-15', botReturnPct: 2.9, twiiReturnPct: 0.9 },
+            { date: '2026-11-25', botReturnPct: 4.25, twiiReturnPct: 1.80 }
+          ],
+          trades: [
+            { date: '2026-11-18', code: '2330', name: '台積電', side: 'SELL', stage: 2, shares: 14, price: 1035, fee: 12, tax: 43, netPnL: 850, reason: '移動停利一 (+15.2%賣1/3)' },
+            { date: '2026-10-28', code: '2330', name: '台積電', side: 'BUY', stage: 1, shares: 14, price: 970, fee: 11, tax: 0, netPnL: 0, reason: '第1批試單：C01/C08/C09+下半身' }
+          ]
+        });
+        return;
+      }
+
+      btn.textContent = '⏳ 運算近65天K線中...'; btn.disabled = true;
+      try {
+        const res = await fetch(APP.gasUrl, {
+          method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+          body: JSON.stringify({ pin: APP.pin, action: 'runBacktest', params })
+        });
+        const data = await res.json();
+        if (!data.ok || (data.backtest && data.backtest.error)) {
+          alert('回測失敗：' + ((data.backtest && data.backtest.error) || data.error || '未知錯誤'));
+          return;
+        }
+        renderBacktestResult(data.backtest);
+      } catch (e) {
+        alert('回測連線失敗：' + e.message);
+      } finally {
+        btn.textContent = '🚀 執行近 3 個月回測'; btn.disabled = false;
+      }
+    }
+
+    function renderBacktestResult(bt) {
+      document.getElementById('btResultArea').classList.remove('hidden');
+      document.getElementById('btRange').textContent = `${bt.startDate} ~ ${bt.endDate}`;
+      document.getElementById('btFinalEq').textContent = '$' + Number(bt.finalEquity || 100000).toLocaleString();
+      document.getElementById('btTotalRet').textContent = `${bt.totalReturnPct >= 0 ? '+' : ''}${bt.totalReturnPct}%`;
+
+      document.getElementById('btAlpha').textContent = `${bt.alpha >= 0 ? '+' : ''}${bt.alpha}%`;
+      document.getElementById('btTwiiRet').textContent = `大盤 ${bt.twiiReturnPct >= 0 ? '+' : ''}${bt.twiiReturnPct}%`;
+      document.getElementById('btAlphaBox').className = 'widget ' + (bt.alpha >= 0 ? 'w-red' : 'w-green');
+
+      document.getElementById('btWinRate').textContent = bt.winRate === null ? '- %' : `${bt.winRate}%`;
+      document.getElementById('btPf').textContent = `賺賠比 ${bt.profitFactor}`;
+      document.getElementById('btTradeStats').textContent = `共 ${bt.totalTrades} 筆`;
+      document.getElementById('btClosedCnt').textContent = `${bt.closedTrades} 筆平倉`;
+      document.getElementById('btMdd').textContent = `${bt.mdd}%`;
+      document.getElementById('btOpenRem').textContent = `期末尚持 ${bt.openRemaining} 檔`;
+
+      document.getElementById('btTradesBody').innerHTML = (!bt.trades || bt.trades.length === 0)
+        ? `<tr><td colspan="8" style="text-align:center; color:#64748b;">此參數組合在近 3 個月內無任何觸發交易（建議放寬連漲限制或改為放寬動能試試）</td></tr>`
+        : bt.trades.map(t => {
+            const cost = Number(t.fee || 0) + Number(t.tax || 0);
+            const pnl = t.side === 'SELL' ? Number(t.netPnL || 0) : null;
+            return `
+              <tr>
+                <td>${t.date}</td>
+                <td><strong>${t.name}</strong> ${t.code}</td>
+                <td class="${t.side === 'BUY' ? 'up' : 'down'}" style="font-weight:800;">${t.side === 'BUY' ? `買進(批${t.stage})` : '賣出'}</td>
+                <td>${t.shares}</td>
+                <td>${t.price}</td>
+                <td>$${cost}</td>
+                <td class="${pnl === null ? '' : (pnl >= 0 ? 'up' : 'down')}" style="font-weight:800;">${pnl === null ? '-' : (pnl >= 0 ? '+' : '') + pnl}</td>
+                <td style="white-space:normal; min-width:170px; font-size:11px; color:#475569;">${t.reason || ''}</td>
+              </tr>
+            `;
+          }).join('');
+
+      const container = document.getElementById('btChartContainer');
+      const curve = bt.equityCurve || [];
+      if (container && window.LightweightCharts && curve.length > 0) {
+        container.innerHTML = '';
+        const chart = LightweightCharts.createChart(container, {
+          layout: { background: { color: '#0f1219' }, textColor: '#cbd5e1' },
+          grid: { vertLines: { color: 'rgba(148,163,184,0.1)' }, horzLines: { color: 'rgba(148,163,184,0.1)' } },
+          width: container.clientWidth || container.parentElement.clientWidth || 580,
+          height: 260,
+          timeScale: { borderColor: 'rgba(148,163,184,0.2)' }
+        });
+        const l1 = chart.addLineSeries({ color: '#ef4444', lineWidth: 2.5, title: '回測%' });
+        l1.setData(curve.map(x => ({ time: x.date, value: x.botReturnPct })));
+        const l2 = chart.addLineSeries({ color: '#3b82f6', lineWidth: 2, title: '大盤%' });
+        l2.setData(curve.map(x => ({ time: x.date, value: x.twiiReturnPct })));
+        chart.timeScale().fitContent();
+      }
     }
 
     function renderSopOverview() {
