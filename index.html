@@ -230,6 +230,18 @@
     .hidden { display: none !important; }
     .tab-pane { display: none; }
     .tab-pane.active { display: block; }
+
+    .sub-tabs { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
+    .sub-tab-btn {
+      border: 1px solid rgba(148, 163, 184, 0.35); background: rgba(255, 255, 255, 0.72);
+      color: #334155; padding: 8px 14px; border-radius: 999px; font-size: 13px; font-weight: 800; cursor: pointer;
+    }
+    .sub-tab-btn.active { background: #0f172a; color: #fff; border-color: #0f172a; }
+    .grid-2 { display: grid; grid-template-columns: 1fr; gap: 12px; }
+    @media (min-width: 768px) { .grid-2 { grid-template-columns: 1fr 1fr; } }
+    .text-right { text-align: right; }
+    .badge-blue { background: #dbeafe; color: #1d4ed8; }
+    .badge-slate { background: #e2e8f0; color: #334155; }
   </style>
 </head>
 <body>
@@ -619,9 +631,181 @@
       </div>
     </section>
 
-    <!-- ==================== 分頁 7：近三個月歷史回測 ==================== -->
+    <!-- ==================== 分頁 7：歷史回測（五年 + 分段回滾 + 近期參數微調） ==================== -->
     <section id="tab-backtest" class="tab-pane">
-      <div class="card-light" style="margin-bottom:14px;">
+      <div class="sub-tabs">
+        <button class="sub-tab-btn active" id="btTabBtn5y" onclick="switchBacktestSubTab('5y')">📊 五年（20 季度）歷史回測</button>
+        <button class="sub-tab-btn" id="btTabBtnCohorts" onclick="switchBacktestSubTab('cohorts')">⏳ 分段回滾（3M / 6M 階段效益）</button>
+        <button class="sub-tab-btn" id="btTabBtnParams" onclick="switchBacktestSubTab('params')">🧪 近期參數微調回測 (1~12個月)</button>
+      </div>
+
+      <!-- 子頁籤 1：五年歷史回測 -->
+      <div id="btSub5y">
+        <div class="card-dark" style="margin-bottom:14px;">
+          <div class="card-title-row" style="flex-wrap:wrap;">
+            <div class="card-title">📊 五年（20 季度）真實歷史回測淨值曲線</div>
+            <span id="bt5yWindowLabel" style="font-size:11px; color:#94a3b8;">載入中...</span>
+          </div>
+          <div id="bt5yMethodLabel" style="font-size:12px; color:#cbd5e1; margin-bottom:10px;"></div>
+          <div id="bt5yChart" style="width:100%; height:280px;"></div>
+        </div>
+
+        <section class="widget-grid">
+          <div class="widget w-blue">
+            <div class="w-head"><span>5 年扣成本淨報酬</span><span>NET RETURN</span></div>
+            <div id="bt5yTotalRet" class="w-val">-</div>
+            <div class="w-foot"><span id="bt5yGrossInfo">扣成本前 -</span><span id="bt5yFinalEq">-</span></div>
+          </div>
+          <div class="widget w-black">
+            <div class="w-head"><span>同期加權指數 (^TWII)</span><span>BENCHMARK</span></div>
+            <div id="bt5yBenchRet" class="w-val">-</div>
+            <div class="w-foot"><span>大盤最大回撤</span><span id="bt5yBmMDD">-</span></div>
+          </div>
+          <div class="widget w-green">
+            <div class="w-head"><span>Sharpe / Sortino / Calmar</span><span>RISK ADJ</span></div>
+            <div id="bt5ySharpe" class="w-val">-</div>
+            <div class="w-foot"><span id="bt5yCagr">年化 -</span><span id="bt5yExposure">曝險 -</span></div>
+          </div>
+          <div class="widget w-red">
+            <div class="w-head"><span>策略最大回撤 (MDD)</span><span>DRAWDOWN</span></div>
+            <div id="bt5yMDD" class="w-val">-</div>
+            <div class="w-foot"><span id="bt5yWinRate">勝率 -</span><span id="bt5yTradeCount">-</span></div>
+          </div>
+        </section>
+
+        <div class="card-light" style="margin-bottom:14px;">
+          <div class="card-title-row">
+            <div class="card-title">🔬 樣本內 (2021–2024) vs 樣本外 (2025–2026) 穩健度對比</div>
+          </div>
+          <div class="grid-2" id="bt5ySampleSplit"></div>
+        </div>
+
+        <div class="card-light" style="margin-bottom:14px;">
+          <div class="card-title-row">
+            <div class="card-title">🗓️ 五年連續複利每季績效 (Q1 ~ Q20)</div>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>季別</th>
+                  <th>統計期間 (3 個月)</th>
+                  <th class="text-right">期初淨值</th>
+                  <th class="text-right">期末淨值</th>
+                  <th class="text-right">單季報酬</th>
+                  <th class="text-right">累計報酬</th>
+                  <th class="text-right">季勝率 / 停損</th>
+                  <th>該季系統選入標的</th>
+                </tr>
+              </thead>
+              <tbody id="bt5yQuartersBody"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="card-light">
+          <div class="card-title-row">
+            <div class="card-title">🧾 回測平倉交易明細 (最近 120 筆，依真實日 K 模擬)</div>
+          </div>
+          <div class="table-wrap" style="max-height:420px; overflow-y:auto;">
+            <table>
+              <thead>
+                <tr>
+                  <th>季別</th>
+                  <th>標的</th>
+                  <th>進場日 ➔ 出場日</th>
+                  <th class="text-right">持有天數</th>
+                  <th class="text-right">進場 ➔ 出場價</th>
+                  <th class="text-right">損益金額</th>
+                  <th class="text-right">報酬率</th>
+                  <th>出場原因</th>
+                </tr>
+              </thead>
+              <tbody id="bt5yTradesBody"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- 子頁籤 2：分段回滾 (3M / 6M 獨立起點) -->
+      <div id="btSubCohorts" class="hidden">
+        <section class="widget-grid">
+          <div class="widget w-blue">
+            <div class="w-head"><span>3 個月獨立平均報酬</span><span>3M AVG</span></div>
+            <div id="olC3mAvg" class="w-val">-</div>
+            <div class="w-foot"><span>每期全新 $100,000</span><span id="olC3mBestWorst">-</span></div>
+          </div>
+          <div class="widget w-green">
+            <div class="w-head"><span>3 個月正報酬期數</span><span>20 期實測</span></div>
+            <div id="olC3mWin" class="w-val">-</div>
+            <div class="w-foot"><span>平均 MDD</span><span id="olC3mMdd">-</span></div>
+          </div>
+          <div class="widget w-amber">
+            <div class="w-head"><span>6 個月獨立平均報酬</span><span>6M AVG</span></div>
+            <div id="olC6mAvg" class="w-val">-</div>
+            <div class="w-foot"><span>貼合 3-6 月波段</span><span id="olC6mBestWorst">-</span></div>
+          </div>
+          <div class="widget w-black">
+            <div class="w-head"><span>6 個月正報酬期數</span><span>10 期實測</span></div>
+            <div id="olC6mWin" class="w-val">-</div>
+            <div class="w-foot"><span>平均 MDD</span><span id="olC6mMdd">-</span></div>
+          </div>
+        </section>
+
+        <div class="card-light" style="margin-bottom:14px;">
+          <div class="card-title-row">
+            <div class="card-title">⏳ 每 6 個月獨立起點實測（10 期，每期重開 $100,000）</div>
+          </div>
+          <div id="olC6mSummaryBar" style="margin-bottom:10px; font-size:12px; font-weight:600; color:#334155;"></div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>期別</th>
+                  <th>獨立 6 個月區間</th>
+                  <th class="text-right">起始資金</th>
+                  <th class="text-right">期末淨值</th>
+                  <th class="text-right">策略報酬</th>
+                  <th class="text-right">同期大盤</th>
+                  <th class="text-right">期內 MDD</th>
+                  <th class="text-right">勝率 / 停損</th>
+                  <th>期間選入標的</th>
+                </tr>
+              </thead>
+              <tbody id="olC6mBody"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="card-light">
+          <div class="card-title-row">
+            <div class="card-title">🔄 每 3 個月獨立起點實測（20 期，每期重開 $100,000）</div>
+          </div>
+          <div id="olC3mSummaryBar" style="margin-bottom:10px; font-size:12px; font-weight:600; color:#334155;"></div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>期別</th>
+                  <th>獨立 3 個月區間</th>
+                  <th class="text-right">起始資金</th>
+                  <th class="text-right">期末淨值</th>
+                  <th class="text-right">策略報酬</th>
+                  <th class="text-right">同期大盤</th>
+                  <th class="text-right">期內 MDD</th>
+                  <th class="text-right">勝率 / 停損</th>
+                  <th>期間選入標的</th>
+                </tr>
+              </thead>
+              <tbody id="olC3mBody"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- 子頁籤 3：原本的近期參數微調回測 (1~12個月) -->
+      <div id="btSubParams" class="hidden">
+        <div class="card-light" style="margin-bottom:14px;">
         <div class="card-title-row" style="flex-wrap:wrap;">
           <div class="card-title">🧪 歷史回測（1 ～ 12 個月真實 K 線驗證）</div>
           <span class="badge badge-light-warn">純記憶體運算・不影響正式帳戶</span>
@@ -733,6 +917,7 @@
             </div>
           </div>
         </div>
+      </div>
       </div>
     </section>
 
@@ -880,6 +1065,7 @@
       if (dBtns[idx]) dBtns[idx].classList.add('active');
       if (mBtns[idx]) mBtns[idx].classList.add('active');
       if (tabId === 'tab-autobot') renderAutoBotChart();
+      if (tabId === 'tab-backtest') loadFiveYearBacktest();
     }
 
     function renderAll() {
@@ -1291,6 +1477,155 @@
         l2.setData(subCurve.map(x => ({ time: x.date, value: x.twiiReturnPct })));
         chart.timeScale().fitContent();
       }
+    }
+
+    let BT_5Y_DATA = null;
+
+    function switchBacktestSubTab(sub) {
+      document.getElementById('btSub5y').classList.toggle('hidden', sub !== '5y');
+      document.getElementById('btSubCohorts').classList.toggle('hidden', sub !== 'cohorts');
+      document.getElementById('btSubParams').classList.toggle('hidden', sub !== 'params');
+      document.getElementById('btTabBtn5y').classList.toggle('active', sub === '5y');
+      document.getElementById('btTabBtnCohorts').classList.toggle('active', sub === 'cohorts');
+      document.getElementById('btTabBtnParams').classList.toggle('active', sub === 'params');
+      if (sub === '5y' || sub === 'cohorts') loadFiveYearBacktest();
+    }
+
+    async function loadFiveYearBacktest() {
+      if (BT_5Y_DATA) {
+        renderFiveYearBacktest();
+        renderOddlotCohorts();
+        return;
+      }
+      try {
+        const res = await fetch('./data/backtest_5y.json');
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        BT_5Y_DATA = await res.json();
+        renderFiveYearBacktest();
+        renderOddlotCohorts();
+      } catch (err) {
+        console.error('載入 5 年回測失敗', err);
+        document.getElementById('bt5yWindowLabel').textContent = '尚未產出 data/backtest_5y.json';
+      }
+    }
+
+    function renderFiveYearBacktest() {
+      const bt = BT_5Y_DATA;
+      if (!bt) return;
+      document.getElementById('bt5yWindowLabel').textContent = `回測區間：${bt.window}（${bt.universeCount || 100} 檔）`;
+      document.getElementById('bt5yMethodLabel').innerHTML = `口徑：<b>${bt.methodology || ''}</b>（總交易成本：$${Number(bt.totalCostsPaid || 0).toLocaleString()}）`;
+      document.getElementById('bt5yTotalRet').textContent = `${bt.totalReturnPct >= 0 ? '+' : ''}${bt.totalReturnPct}%`;
+      document.getElementById('bt5yGrossInfo').textContent = `扣成本前 ${bt.grossReturnPct >= 0 ? '+' : ''}${bt.grossReturnPct ?? '-'}%`;
+      document.getElementById('bt5yFinalEq').textContent = `$${Number(bt.finalEquity).toLocaleString()}`;
+      document.getElementById('bt5yBenchRet').textContent = `${bt.benchmarkReturnPct >= 0 ? '+' : ''}${bt.benchmarkReturnPct}%`;
+      document.getElementById('bt5yBmMDD').textContent = `${bt.benchmarkMddPct ?? '-'}%`;
+
+      const m = bt.metrics || {};
+      document.getElementById('bt5ySharpe').textContent = `${m.sharpe ?? '-'} / ${m.sortino ?? '-'} / ${m.calmar ?? '-'}`;
+      document.getElementById('bt5yCagr').textContent = `年化 ${m.cagrPct >= 0 ? '+' : ''}${m.cagrPct ?? '-'}%`;
+      document.getElementById('bt5yExposure').textContent = `平均曝險 ${bt.avgExposurePct ?? '-'}%`;
+
+      document.getElementById('bt5yWinRate').textContent = `勝率 ${bt.overallWinRatePct}%`;
+      document.getElementById('bt5yTradeCount').textContent = `${bt.totalClosedTrades} 筆`;
+      document.getElementById('bt5yMDD').textContent = `${bt.maxDrawdownPct}%`;
+
+      if (bt.inSample && bt.outSample) {
+        const renderSampleCard = (title, s, badgeCls) => `
+          <div style="padding:12px; border-radius:14px; background:rgba(15,23,42,0.05); border:1px solid rgba(148,163,184,0.25);">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+              <span class="badge ${badgeCls}">${title}</span>
+              <span style="font-size:11px; color:#64748b;">${s.period}</span>
+            </div>
+            <div style="font-size:13px; line-height:1.8;">
+              策略報酬：<b class="${s.strategyReturnPct >= 0 ? 'up' : 'down'}">${s.strategyReturnPct >= 0 ? '+' : ''}${s.strategyReturnPct}%</b>（同期大盤 ${s.benchmarkReturnPct >= 0 ? '+' : ''}${s.benchmarkReturnPct}%）<br/>
+              年化報酬：<b>${s.cagrPct >= 0 ? '+' : ''}${s.cagrPct}%</b> ｜ Sharpe：<b>${s.sharpe}</b> ｜ MDD：<b class="down">${s.mddPct}%</b>
+            </div>
+          </div>`;
+        document.getElementById('bt5ySampleSplit').innerHTML =
+          renderSampleCard('樣本內開發期 (2021–2024)', bt.inSample, 'badge-slate') +
+          renderSampleCard('樣本外檢驗期 (2025–2026)', bt.outSample, 'badge-blue');
+      }
+
+      document.getElementById('bt5yQuartersBody').innerHTML = (bt.quarters || []).map(q => `
+        <tr>
+          <td><span class="badge badge-blue">${q.quarter}</span></td>
+          <td style="font-size:12px;">${q.period}</td>
+          <td class="text-right">$${Number(q.startEquity).toLocaleString()}</td>
+          <td class="text-right"><b>$${Number(q.endEquity).toLocaleString()}</b></td>
+          <td class="text-right ${q.quarterReturnPct >= 0 ? 'up' : 'down'}">${q.quarterReturnPct >= 0 ? '+' : ''}${q.quarterReturnPct}%</td>
+          <td class="text-right ${q.cumReturnPct >= 0 ? 'up' : 'down'}">${q.cumReturnPct >= 0 ? '+' : ''}${q.cumReturnPct}%</td>
+          <td class="text-right" style="font-size:12px;">${q.winRatePct}% (${q.closedCount}筆) / 停損 ${q.stopLossCount}</td>
+          <td style="font-size:12px; white-space:normal; min-width:180px;">${(q.selectedStocks || []).slice(0, 8).join('、') || '維持既有部位'}${(q.selectedStocks || []).length > 8 ? ` 等${q.selectedStocks.length}檔` : ''}</td>
+        </tr>`).join('');
+
+      document.getElementById('bt5yTradesBody').innerHTML = (bt.closedTrades || []).slice().reverse().map(t => `
+        <tr>
+          <td><span class="badge badge-slate">${t.quarter}</span></td>
+          <td><b>${t.sym} ${t.name}</b><div style="font-size:11px; color:#64748b;">${t.category || ''}</div></td>
+          <td style="font-size:12px;">${t.entryDate} ➔ ${t.exitDate}</td>
+          <td class="text-right">${t.holdDays} 天</td>
+          <td class="text-right" style="font-size:12px;">${t.entryPrice} ➔ ${t.exitPrice}</td>
+          <td class="text-right ${t.pnlAmount >= 0 ? 'up' : 'down'}">$${Number(t.pnlAmount).toLocaleString()}</td>
+          <td class="text-right ${t.pnlPct >= 0 ? 'up' : 'down'}">${t.pnlPct >= 0 ? '+' : ''}${t.pnlPct}%</td>
+          <td style="font-size:12px;">${t.reason}</td>
+        </tr>`).join('');
+
+      const container = document.getElementById('bt5yChart');
+      if (container && window.LightweightCharts && bt.equityCurve && bt.equityCurve.length > 0) {
+        container.innerHTML = '';
+        const chart = LightweightCharts.createChart(container, {
+          layout: { background: { color: '#0f1219' }, textColor: '#cbd5e1' },
+          grid: { vertLines: { color: 'rgba(148,163,184,0.12)' }, horzLines: { color: 'rgba(148,163,184,0.12)' } },
+          width: container.clientWidth || container.parentElement.clientWidth || 580,
+          height: 280,
+          rightPriceScale: { borderColor: 'rgba(148,163,184,0.2)' },
+          timeScale: { borderColor: 'rgba(148,163,184,0.2)' }
+        });
+        const eqSeries = chart.addLineSeries({ color: '#ef4444', lineWidth: 2.5, title: '零股策略淨值' });
+        const bmSeries = chart.addLineSeries({ color: '#3b82f6', lineWidth: 2, lineStyle: 2, title: '大盤基準' });
+        eqSeries.setData(bt.equityCurve.map(p => ({ time: p.date, value: p.equity })));
+        bmSeries.setData(bt.equityCurve.map(p => ({ time: p.date, value: p.benchmark })));
+        chart.timeScale().fitContent();
+      }
+    }
+
+    function renderOddlotCohorts() {
+      const bt = BT_5Y_DATA;
+      if (!bt || !bt.independent3M || !bt.independent6M) return;
+
+      const s3 = bt.independent3M.summary;
+      const s6 = bt.independent6M.summary;
+
+      document.getElementById('olC3mAvg').textContent = `${s3.avgReturnPct >= 0 ? '+' : ''}${s3.avgReturnPct}%`;
+      document.getElementById('olC3mBestWorst').textContent = `${s3.bestReturnPct >= 0 ? '+' : ''}${s3.bestReturnPct}% / ${s3.worstReturnPct}%`;
+      document.getElementById('olC3mWin').textContent = `${s3.positivePeriods}/${s3.totalPeriods} (${s3.positiveRatePct}%)`;
+      document.getElementById('olC3mMdd').textContent = `${s3.avgMddPct}%`;
+
+      document.getElementById('olC6mAvg').textContent = `${s6.avgReturnPct >= 0 ? '+' : ''}${s6.avgReturnPct}%`;
+      document.getElementById('olC6mBestWorst').textContent = `${s6.bestReturnPct >= 0 ? '+' : ''}${s6.bestReturnPct}% / ${s6.worstReturnPct}%`;
+      document.getElementById('olC6mWin').textContent = `${s6.positivePeriods}/${s6.totalPeriods} (${s6.positiveRatePct}%)`;
+      document.getElementById('olC6mMdd').textContent = `${s6.avgMddPct}%`;
+
+      document.getElementById('olC6mSummaryBar').innerHTML =
+        `中位數報酬：<b>${s6.medianReturnPct >= 0 ? '+' : ''}${s6.medianReturnPct}%</b> ｜ 同期大盤平均：<b>${s6.avgBenchmarkPct >= 0 ? '+' : ''}${s6.avgBenchmarkPct}%</b> ｜ 贏過大盤期數：<b>${s6.beatBenchmarkCount}/${s6.totalPeriods}</b>`;
+      document.getElementById('olC3mSummaryBar').innerHTML =
+        `中位數報酬：<b>${s3.medianReturnPct >= 0 ? '+' : ''}${s3.medianReturnPct}%</b> ｜ 同期大盤平均：<b>${s3.avgBenchmarkPct >= 0 ? '+' : ''}${s3.avgBenchmarkPct}%</b> ｜ 贏過大盤期數：<b>${s3.beatBenchmarkCount}/${s3.totalPeriods}</b>`;
+
+      const rowHtml = c => `
+        <tr>
+          <td><span class="badge badge-blue">${c.label}</span></td>
+          <td style="font-size:12px;">${c.period}</td>
+          <td class="text-right">$${Number(c.startEquity).toLocaleString()}</td>
+          <td class="text-right"><b>$${Number(c.endEquity).toLocaleString()}</b></td>
+          <td class="text-right ${c.returnPct >= 0 ? 'up' : 'down'}">${c.returnPct >= 0 ? '+' : ''}${c.returnPct}%</td>
+          <td class="text-right ${c.benchmarkPct >= 0 ? 'up' : 'down'}">${c.benchmarkPct >= 0 ? '+' : ''}${c.benchmarkPct}%</td>
+          <td class="text-right down">${c.mddPct}%</td>
+          <td class="text-right" style="font-size:12px;">${c.winRatePct}% (${c.tradesCount}筆) / 停損 ${c.stopLossCount}</td>
+          <td style="font-size:12px; white-space:normal; min-width:180px;">${(c.selectedStocks || []).slice(0, 8).join('、') || '無進場'}${(c.selectedStocks || []).length > 8 ? ` 等${c.selectedStocks.length}檔` : ''}</td>
+        </tr>`;
+
+      document.getElementById('olC6mBody').innerHTML = (bt.independent6M.cohorts || []).map(rowHtml).join('');
+      document.getElementById('olC3mBody').innerHTML = (bt.independent3M.cohorts || []).map(rowHtml).join('');
     }
 
     function renderSopOverview() {
